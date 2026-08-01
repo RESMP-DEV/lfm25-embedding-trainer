@@ -25,7 +25,9 @@ cd lfm25-embedding-trainer
 uv sync --extra train --extra dev
 ```
 
-PyTorch selects CUDA, Apple MPS, or CPU automatically. Use `--device` to override it.
+PyTorch selects NVIDIA CUDA, AMD ROCm, Apple MPS, or CPU automatically. PyTorch intentionally
+reports ROCm devices as `cuda`; use `--device cuda` on AMD. ROCm requires a hardware-matched
+PyTorch build rather than the default Linux PyTorch wheel. See [Fine-tuning on AMD ROCm](docs/AMD_ROCM.md).
 
 An end-to-end one-step smoke run (including the real model download and checkpoint save) is:
 
@@ -96,6 +98,21 @@ uv run lfm25-embed train data/splits/train.jsonl \
   --validation-pairs data/splits/dev.jsonl \
   --device cuda
 ```
+
+For an AMD Ryzen APU or Radeon GPU with a supported ROCm PyTorch build, start with validated
+FP16 and the conservative AMD profile:
+
+```bash
+lfm25-embed train data/splits/train.jsonl \
+  --config configs/amd-rocm.toml \
+  --output models/lfm25-my-data-rocm \
+  --validation-pairs data/splits/dev.jsonl \
+  --device cuda
+```
+
+The training receipt records `accelerator: "rocm"`, the HIP and PyTorch versions, and whether
+fused AdamW was used. The portable AdamW path is selected on ROCm until the exact target has
+been benchmarked.
 
 Compare the pinned base model and tuned checkpoint on the same untouched test set:
 

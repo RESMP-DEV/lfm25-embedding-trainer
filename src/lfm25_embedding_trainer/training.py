@@ -31,7 +31,7 @@ class TrainConfig:
     seed: int
     max_steps: int | None = None
     log_every_steps: int = 10
-    precision: Literal["fp32", "bf16"] = "fp32"
+    precision: Literal["fp32", "fp16", "bf16"] = "fp32"
 
     @classmethod
     def load(cls, path: Path) -> TrainConfig:
@@ -116,17 +116,26 @@ def train(
     pairs = _load_pairs(pairs_path)
     loader = DataLoader(cast(Any, pairs), batch_size=config.batch_size, shuffle=True)
     encoder = EmbeddingEncoder(config.model_id, config.model_revision, device)
-    if config.precision == "bf16" and encoder.device != "cuda":
-        raise ValueError("bf16 training is currently enabled only for CUDA")
+    if config.precision in {"fp16", "bf16"} and encoder.device != "cuda":
+        raise ValueError("fp16 and bf16 training require a CUDA or ROCm device")
+    if config.precision == "bf16" and not torch.cuda.is_bf16_supported():
+        raise ValueError("bf16 is not supported by this device; use fp16 or fp32")
     if encoder.device == "cuda":
         torch.set_float32_matmul_precision("high")
+        torch.cuda.reset_peak_memory_stats()
     encoder.model.train()
+    # Fused AdamW is a useful NVIDIA default, but its support varies across
+    # ROCm device families and PyTorch builds. Prefer the portable implementation
+    # until the exact AMD target has been probed.
+    fused_optimizer = encoder.accelerator == "cuda"
     optimizer = AdamW(
         encoder.model.parameters(),
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
-        fused=encoder.device == "cuda",
+        fused=fused_optimizer,
     )
+    scaler = torch.amp.GradScaler("cuda", enabled=config.precision == "fp16")
+    amp_dtype = torch.float16 if config.precision == "fp16" else torch.bfloat16
     available_steps = math.ceil(len(loader) / config.gradient_accumulation_steps) * config.epochs
     update_steps = min(available_steps, config.max_steps or available_steps)
     scheduler = get_linear_schedule_with_warmup(
@@ -158,6 +167,8 @@ def train(
                 "pairs_sha256": _sha256(pairs_path),
                 "model_revision": config.model_revision,
                 "device": encoder.device,
+                "accelerator": encoder.accelerator,
+                "fused_optimizer": fused_optimizer,
             },
             tags=["embedding-training", "lfm2.5-encoder", "contrastive"],
             job_type="train",
@@ -170,8 +181,8 @@ def train(
                 queries, positives, document_keys = list(batch[0]), list(batch[1]), list(batch[2])
                 with torch.autocast(
                     device_type=encoder.device,
-                    dtype=torch.bfloat16,
-                    enabled=config.precision == "bf16",
+                    dtype=amp_dtype,
+                    enabled=config.precision in {"fp16", "bf16"},
                 ):
                     query_embeddings = encoder.encode_torch(queries, config.max_length)
                     positive_embeddings = encoder.encode_torch(positives, config.max_length)
@@ -179,15 +190,17 @@ def train(
                     raw_loss = _multi_positive_loss(scores, document_keys)
                 accumulated_loss += float(raw_loss.detach().cpu())
                 loss = raw_loss / config.gradient_accumulation_steps
-                loss.backward()
+                scaler.scale(loss).backward()
                 should_update = (
                     batch_index % config.gradient_accumulation_steps == 0
                     or batch_index == len(loader)
                 )
                 if not should_update:
                     continue
+                scaler.unscale_(optimizer)
                 gradient_norm = torch.nn.utils.clip_grad_norm_(encoder.model.parameters(), 1.0)
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
                 step += 1
@@ -246,6 +259,20 @@ def train(
         "finished_at": finished_at.isoformat(),
         "duration_seconds": time.monotonic() - started_clock,
         "device": encoder.device,
+        "accelerator": encoder.accelerator,
+        "torch_version": torch.__version__,
+        "hip_version": torch.version.hip,
+        "cuda_version": torch.version.cuda,
+        "fused_optimizer": fused_optimizer,
+        "accelerator_name": (
+            torch.cuda.get_device_name() if encoder.device == "cuda" else encoder.device
+        ),
+        "peak_memory_allocated_bytes": (
+            torch.cuda.max_memory_allocated() if encoder.device == "cuda" else None
+        ),
+        "peak_memory_reserved_bytes": (
+            torch.cuda.max_memory_reserved() if encoder.device == "cuda" else None
+        ),
         "tracking": asdict(tracking),
         "wandb_run_id": getattr(run, "id", None),
         "wandb_run_url": getattr(run, "url", None),

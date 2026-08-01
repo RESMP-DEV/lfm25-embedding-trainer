@@ -95,7 +95,8 @@ Start conservatively:
 - warmup ratio: `0.03` to `0.1`;
 - weight decay: `0.01` to `0.1`;
 - temperature: `0.03` to `0.1`;
-- BF16 on compatible CUDA hardware, otherwise FP32; and
+- BF16 on compatible NVIDIA hardware, FP16 on officially validated Ryzen/ROCm hardware,
+  otherwise FP32; and
 - the largest batch that survives representative long examples.
 
 Contrastive learning benefits from larger batches because each batch supplies more negatives.
@@ -103,7 +104,9 @@ Gradient accumulation does not provide the same negative set as one physically l
 When memory is limited, improve negative quality rather than assuming accumulation is equivalent.
 
 `configs/train.toml` is a portable FP32 starting point. `configs/cuda.toml` is a bounded BF16
-CUDA run. Edit `max_steps` and batch size for your corpus and hardware.
+NVIDIA CUDA run, and `configs/amd-rocm.toml` is a bounded FP16 ROCm run. Edit `max_steps` and
+batch size for your corpus and hardware. See [Fine-tuning on AMD ROCm](AMD_ROCM.md) before
+installing PyTorch on an AMD system.
 
 ## 7. Track and sweep
 

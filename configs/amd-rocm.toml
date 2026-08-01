@@ -1,0 +1,14 @@
+model_id = "LiquidAI/LFM2.5-Encoder-350M"
+model_revision = "b886781f7c6f10ca9b7096e21b83e30a073c2f39"
+max_length = 512
+batch_size = 16
+learning_rate = 0.00002
+weight_decay = 0.1
+warmup_ratio = 0.1
+epochs = 1
+temperature = 0.05
+gradient_accumulation_steps = 1
+seed = 42
+max_steps = 1000
+log_every_steps = 10
+precision = "fp16"
