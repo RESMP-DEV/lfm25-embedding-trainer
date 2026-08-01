@@ -1,9 +1,9 @@
 # Fine-tuning on AMD ROCm
 
-LFM2.5 Encoder does not require a CUDA-only kernel. Its tokenizer, Transformer backbone,
-mean pooling, contrastive loss, and optimizer are standard PyTorch operations. PyTorch's ROCm
-build deliberately reuses the `torch.cuda` API, so this project uses `--device cuda` for both
-NVIDIA and AMD accelerators.
+LFM2.5 Embedding does not require a CUDA-only kernel. Its Sentence Transformers wrapper,
+bidirectional backbone, CLS pooling, contrastive loss, and optimizer are standard PyTorch
+operations. PyTorch's ROCm build deliberately reuses the `torch.cuda` API, so this project uses
+`--device cuda` for both NVIDIA and AMD accelerators.
 
 The code changes needed for AMD are therefore small. The environment is the hardware-specific
 part: install a ROCm PyTorch build validated for the exact GPU or APU, operating system, Python
@@ -16,14 +16,16 @@ On 2026-08-01, the full one-step path completed on a physical 8 GB Radeon RX 570
 
 - the model loaded at its pinned revision without an architecture override;
 - FP16 forward, backward, gradient unscale, clipping, and portable AdamW completed;
-- gradient norm was finite at `19.9039249420166` with zero detected overflows;
-- peak allocated/reserved VRAM was 6,295,712,256/6,457,131,008 bytes;
-- all 149 checkpoint tensors changed from the pinned base model; and
-- checkpoint save, reload, and retrieval evaluation completed.
+- the embedding checkpoint's native CLS pool and query/document prompts were used;
+- gradient norm was finite at `0.1623353362083435` with zero detected overflows;
+- peak allocated/reserved VRAM was 6,292,566,528/6,473,908,224 bytes;
+- all 148 checkpoint tensors changed from the pinned embedding base model, with maximum absolute
+  delta `2.8133392333984375e-05`; and
+- the complete Sentence Transformers checkpoint saved, reloaded, and evaluated successfully.
 
 A second capacity probe used actual `[batch, 512]` token tensors for both query and document
-forwards. Batch size 2 completed an FP16 optimizer step with 7,128,219,648 bytes peak reserved;
-batch size 3 exhausted the 8 GB card at 8,143,241,216 bytes peak reserved. The conservative
+forwards. Batch size 2 completed an FP16 optimizer step with 7,163,871,232 bytes peak reserved;
+batch size 3 exhausted the 8 GB card at 8,141,144,064 bytes peak reserved. The conservative
 `configs/amd-rocm.toml` profile therefore starts at the largest physically validated full-length
 batch, 2. Scale upward only after probing the target card with representative sequence lengths.
 
@@ -79,7 +81,7 @@ strings.
 Start with the synthetic fixture and one optimizer step before using private data:
 
 ```bash
-lfm25-embed train examples/pairs.jsonl \
+uv run lfm25-embed train examples/pairs.jsonl \
   --config configs/amd-rocm-smoke.toml \
   --output models/amd-smoke \
   --validation-pairs examples/pairs.jsonl \
@@ -103,6 +105,10 @@ AdamW on ROCm because fused-optimizer coverage varies by device family and PyTor
 The AMD profiles start with a conservative loss scale of 128. A detected FP16 overflow does
 not count as an optimizer step or advance the learning-rate scheduler; a run with no successful
 update fails instead of emitting a misleading checkpoint receipt.
+
+The embedding checkpoint's remote code currently fails under Transformers 5.x. The project pins
+the compatible `transformers>=4.56,<5` range; do not remove that constraint without rerunning the
+real model load, optimizer, save, and reload checks.
 
 ## 4. Calibrate the real run
 

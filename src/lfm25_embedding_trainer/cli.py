@@ -83,7 +83,7 @@ def train(
     wandb_entity: str | None = None,
     wandb_run_name: str | None = None,
 ) -> None:
-    """Fine-tune LFM2.5 Encoder with symmetric multi-positive InfoNCE."""
+    """Fine-tune LFM2.5 Embedding with symmetric multi-positive InfoNCE."""
     if wandb_mode not in {"disabled", "offline", "online"}:
         raise typer.BadParameter("must be disabled, offline, or online", param_hint="wandb-mode")
     train_model(
@@ -162,8 +162,13 @@ def embed(
     device: str = "auto",
     batch_size: Annotated[int, typer.Option(min=1)] = 32,
     max_length: Annotated[int, typer.Option(min=1)] = 512,
+    prompt_name: str = typer.Option(
+        "document", help="query for search inputs or document for indexed passages"
+    ),
 ) -> None:
     """Encode a JSONL file and write IDs with normalized embedding vectors."""
+    if prompt_name not in {"query", "document"}:
+        raise typer.BadParameter("must be query or document", param_hint="prompt-name")
     rows = list(read_jsonl(input_path))
     if not rows:
         raise typer.BadParameter("input dataset is empty", param_hint="input-path")
@@ -173,7 +178,11 @@ def embed(
         for start in range(0, len(rows), batch_size):
             batch = rows[start : start + batch_size]
             texts = [str(row[text_field]) for row in batch]
-            vectors = encoder.encode(texts, max_length=max_length)
+            vectors = encoder.encode(
+                texts,
+                max_length=max_length,
+                prompt_name=prompt_name,
+            )
             for row, vector in zip(batch, vectors, strict=True):
                 handle.write(json.dumps({"id": row[id_field], "embedding": vector.tolist()}) + "\n")
     typer.echo(f"wrote {len(rows)} embeddings to {output}")

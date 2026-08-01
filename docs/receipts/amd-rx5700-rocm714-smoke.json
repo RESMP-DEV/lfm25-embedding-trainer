@@ -1,5 +1,5 @@
 {
-  "kind": "one-step-training-smoke",
+  "kind": "one-step-embedding-training-smoke",
   "date": "2026-08-01",
   "hardware": {
     "accelerator_name": "AMD Radeon RX 5700",
@@ -12,11 +12,17 @@
     "python": "3.13.14",
     "torch": "2.12.0+rocm7.14.0",
     "hip": "7.14.60850",
-    "transformers": "5.14.1"
+    "transformers": "4.57.6",
+    "sentence_transformers": "5.6.1"
   },
   "model": {
-    "id": "LiquidAI/LFM2.5-Encoder-350M",
-    "revision": "b886781f7c6f10ca9b7096e21b83e30a073c2f39"
+    "id": "LiquidAI/LFM2.5-Embedding-350M",
+    "revision": "f35ae2c91d687658dbf1f2b449382f0b019b9808",
+    "pooling": "cls",
+    "prompts": {
+      "query": "query: ",
+      "document": "document: "
+    }
   },
   "configuration": {
     "precision": "fp16",
@@ -28,36 +34,39 @@
   },
   "training": {
     "optimizer_steps": 1,
-    "loss": 0.5588746070861816,
-    "gradient_norm": 19.9039249420166,
+    "loss": 0.0008117824327200651,
+    "gradient_norm": 0.1623353362083435,
     "fp16_overflow_count": 0,
-    "steps_per_second_after_initialization": 0.7483888960749843,
-    "peak_memory_allocated_bytes": 6295712256,
-    "peak_memory_reserved_bytes": 6457131008
+    "steps_per_second_after_initialization": 0.689201287260864,
+    "peak_memory_allocated_bytes": 6292566528,
+    "peak_memory_reserved_bytes": 6473908224
   },
   "full_length_capacity_probe": {
     "sequence_length": 512,
     "query_and_document_forwards": true,
     "batch_size_2": {
       "optimizer_step_completed": true,
-      "loss": 0.5174427032470703,
-      "gradient_norm": 8.859967231750488,
-      "peak_memory_allocated_bytes": 6283121152,
-      "peak_memory_reserved_bytes": 7128219648
+      "loss": 0.000009179072549159173,
+      "gradient_norm": 0.009421436116099358,
+      "peak_memory_allocated_bytes": 6284169728,
+      "peak_memory_reserved_bytes": 7163871232
     },
     "batch_size_3": {
       "optimizer_step_completed": false,
       "failure": "out_of_memory",
-      "peak_memory_allocated_bytes": 7915835392,
-      "peak_memory_reserved_bytes": 8143241216
+      "peak_memory_allocated_bytes": 7910658560,
+      "peak_memory_reserved_bytes": 8141144064
     },
     "fitness_claim": false
   },
   "checkpoint": {
-    "sha256": "ec6f6fae52f54de9cb286202c3b7e6cd66fc14442a978501e720ca983c2cdffe",
-    "changed_tensors": 149,
-    "total_tensors": 149,
-    "max_abs_delta": 0.000027418136596679688
+    "sha256": "0a2dd3ca960c9aba61cc9b6c93a2da104330121d997af52d685a3415836fda69",
+    "changed_tensors": 148,
+    "total_tensors": 148,
+    "max_abs_delta": 0.000028133392333984375,
+    "remote_modeling_code_saved": true,
+    "sentence_transformers_metadata_saved": true,
+    "reload_succeeded": true
   },
   "synthetic_fixture_evaluation": {
     "queries": 6,
@@ -68,7 +77,7 @@
     "fitness_claim": false
   },
   "notes": [
-    "The synthetic fixture validates execution, not production retrieval quality.",
+    "The synthetic fixture validates execution and persistence, not production retrieval quality.",
     "MIOpen reported a missing prebuilt gfx1010 database and used a working fallback path."
   ]
 }

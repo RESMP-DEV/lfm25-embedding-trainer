@@ -1,7 +1,7 @@
 [project]
 name = "lfm25-embedding-trainer"
-version = "0.2.0"
-description = "Fine-tune LiquidAI LFM2.5 Encoder models on your own retrieval pairs"
+version = "0.3.0"
+description = "Fine-tune LiquidAI LFM2.5 Embedding models on your own retrieval pairs"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 authors = [{ name = "RESMP.DEV contributors" }]
@@ -15,8 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 train = [
   "optuna>=4,<5",
+  "sentence-transformers>=5.1,<6",
   "torch>=2.5",
-  "transformers>=4.56",
+  "transformers>=4.56,<5",
   "wandb>=0.19,<1",
 ]
 dev = [

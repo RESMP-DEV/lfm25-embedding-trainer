@@ -15,7 +15,13 @@ class FakeEncoder:
         "query two": [0.0, 1.0],
     }
 
-    def encode(self, texts: list[str]) -> np.ndarray:
+    def __init__(self) -> None:
+        self.prompt_calls: list[str] = []
+
+    def encode(
+        self, texts: list[str], max_length: int = 512, prompt_name: str = "document"
+    ) -> np.ndarray:
+        self.prompt_calls.append(prompt_name)
         return np.asarray([self.vectors[text] for text in texts], dtype=np.float32)
 
 
@@ -26,7 +32,8 @@ def test_evaluate_ranks_matching_documents_first(tmp_path: Path) -> None:
         {"query": "query two", "positive": "document two", "source": "x", "source_id": "2"},
     ]
     path.write_text("".join(json.dumps(row) + "\n" for row in rows))
-    metrics = evaluate(FakeEncoder(), path, batch_size=1)
+    encoder = FakeEncoder()
+    metrics = evaluate(encoder, path, batch_size=1)
     assert metrics == {
         "queries": 2.0,
         "mrr": 1.0,
@@ -34,6 +41,7 @@ def test_evaluate_ranks_matching_documents_first(tmp_path: Path) -> None:
         "recall_at_5": 1.0,
         "recall_at_10": 1.0,
     }
+    assert encoder.prompt_calls == ["document", "document", "query", "query"]
 
 
 def test_evaluate_rejects_empty_file(tmp_path: Path) -> None:

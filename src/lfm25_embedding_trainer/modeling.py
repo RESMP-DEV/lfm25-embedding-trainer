@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import inspect
+import shutil
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
+
+PromptName = Literal["query", "document"]
 
 
 def resolve_device(requested: str) -> str:
@@ -18,10 +22,15 @@ def resolve_device(requested: str) -> str:
     return "cpu"
 
 
+def device_type(device: str) -> str:
+    """Return the accelerator type for an optionally indexed device string."""
+    return device.partition(":")[0]
+
+
 def accelerator_backend(torch_module: Any, device: str) -> str:
     """Return the physical accelerator while retaining PyTorch's device spelling.
 
-    PyTorch intentionally exposes ROCm devices through the ``cuda`` API.  The
+    PyTorch intentionally exposes ROCm devices through the ``cuda`` API. The
     distinction is still useful for receipts and backend-specific safe defaults.
     """
     if device_type(device) == "cuda" and getattr(torch_module.version, "hip", None):
@@ -29,59 +38,73 @@ def accelerator_backend(torch_module: Any, device: str) -> str:
     return device_type(device)
 
 
-def device_type(device: str) -> str:
-    """Return the accelerator type for an optionally indexed device string."""
-    return device.partition(":")[0]
-
-
 class EmbeddingEncoder:
-    """Mean-pooled, L2-normalized LFM2.5 encoder wrapper."""
+    """Prompt-aware LFM2.5 embedding checkpoint with its native CLS pooling."""
 
     def __init__(self, model_id: str, revision: str = "main", device: str = "auto") -> None:
         import torch
-        from transformers import AutoModelForMaskedLM, AutoTokenizer
+        from sentence_transformers import SentenceTransformer
 
         self.torch = torch
         self.device = resolve_device(device)
         self.device_type = device_type(self.device)
         self.accelerator = accelerator_backend(torch, self.device)
-        self.tokenizer = cast(
-            Any,
-            AutoTokenizer.from_pretrained(model_id, revision=revision, trust_remote_code=True),
+        self.model = SentenceTransformer(
+            model_id,
+            revision=revision,
+            trust_remote_code=True,
+            device=self.device,
         )
-        # The published safetensors keys are rooted at ``lfm2.*``. Loading the
-        # advertised AutoModel body directly currently drops those weights as
-        # unexpected and silently initializes a fresh body. Load the checkpoint's
-        # real MLM architecture first, then train/use its populated backbone.
-        self.wrapper = AutoModelForMaskedLM.from_pretrained(
-            model_id, revision=revision, trust_remote_code=True
-        ).to(self.device)
-        self.model = self.wrapper.lfm2
+        maximum_length = self.model.max_seq_length
+        if maximum_length is None:
+            raise ValueError("embedding checkpoint does not declare a maximum sequence length")
+        self.maximum_length = maximum_length
+        required_prompts = {"query", "document"}
+        missing_prompts = required_prompts.difference(self.model.prompts)
+        if missing_prompts:
+            missing = ", ".join(sorted(missing_prompts))
+            raise ValueError(
+                f"model is not a prompt-aware embedding checkpoint; missing prompts: {missing}"
+            )
 
-    @staticmethod
-    def pool(last_hidden_state, attention_mask):
-        mask = attention_mask.unsqueeze(-1).to(last_hidden_state.dtype)
-        summed = (last_hidden_state * mask).sum(dim=1)
-        return summed / mask.sum(dim=1).clamp(min=1e-9)
-
-    def encode_torch(self, texts: list[str], max_length: int = 512):
-        tokens = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=max_length,
-            return_tensors="pt",
-        ).to(self.device)
-        outputs = self.model(**tokens)
-        embeddings = self.pool(outputs.last_hidden_state, tokens["attention_mask"])
+    def encode_torch(
+        self,
+        texts: list[str],
+        max_length: int = 512,
+        prompt_name: PromptName = "document",
+    ):
+        if max_length > self.maximum_length:
+            raise ValueError(
+                f"max_length {max_length} exceeds the checkpoint limit {self.maximum_length}"
+            )
+        self.model.max_seq_length = max_length
+        features = self.model.preprocess(
+            cast(list[Any], texts), prompt=self.model.prompts[prompt_name]
+        )
+        features = {
+            key: value.to(self.device) if isinstance(value, self.torch.Tensor) else value
+            for key, value in features.items()
+        }
+        embeddings = self.model(features)["sentence_embedding"]
         return self.torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
-    def encode(self, texts: list[str], max_length: int = 512) -> np.ndarray:
+    def encode(
+        self,
+        texts: list[str],
+        max_length: int = 512,
+        prompt_name: PromptName = "document",
+    ) -> np.ndarray:
         self.model.eval()
         with self.torch.inference_mode():
-            return self.encode_torch(texts, max_length=max_length).float().cpu().numpy()
+            return (
+                self.encode_torch(texts, max_length=max_length, prompt_name=prompt_name)
+                .float()
+                .cpu()
+                .numpy()
+            )
 
     def save(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        self.wrapper.save_pretrained(directory)
-        self.tokenizer.save_pretrained(directory)
+        self.model.save_pretrained(str(directory), safe_serialization=True)
+        remote_code = Path(inspect.getfile(self.model[0].auto_model.__class__))
+        shutil.copy2(remote_code, directory / "modeling_lfm2_bidirectional.py")
