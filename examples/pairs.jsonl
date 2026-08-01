@@ -1,0 +1,6 @@
+{"query":"reset a wireless router","positive":"To reset the router, hold its reset button for ten seconds, then wait for it to restart.","source":"support","source_id":"router-reset"}
+{"query":"restore router factory settings","positive":"To reset the router, hold its reset button for ten seconds, then wait for it to restart.","source":"support","source_id":"router-reset"}
+{"query":"change the account password","positive":"Open Account Settings, choose Security, and select Change password.","source":"support","source_id":"account-password"}
+{"query":"update my login password","positive":"Open Account Settings, choose Security, and select Change password.","source":"support","source_id":"account-password"}
+{"query":"export a project","positive":"Choose File, Export, select the destination format, and confirm the export directory.","source":"manual","source_id":"project-export"}
+{"query":"save a project in another format","positive":"Choose File, Export, select the destination format, and confirm the export directory.","source":"manual","source_id":"project-export"}

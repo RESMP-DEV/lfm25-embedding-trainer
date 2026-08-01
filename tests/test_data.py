@@ -1,0 +1,71 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from lfm25_embedding_trainer.data import prepare_pairs, validate_pairs
+
+
+def test_prepare_maps_custom_fields_and_groups(tmp_path: Path) -> None:
+    source = tmp_path / "source.jsonl"
+    source.write_text(
+        json.dumps(
+            {
+                "question": "How do I reset it?",
+                "answer": "Hold the reset button for ten seconds.",
+                "document": 7,
+                "product": "router",
+            }
+        )
+        + "\n"
+    )
+    output = tmp_path / "pairs.jsonl"
+    assert (
+        prepare_pairs(
+            source,
+            output,
+            query_field="question",
+            positive_field="answer",
+            id_field="document",
+            source="support",
+            group_field="product",
+        )
+        == 1
+    )
+    row = json.loads(output.read_text())
+    assert row == {
+        "query": "How do I reset it?",
+        "positive": "Hold the reset button for ten seconds.",
+        "source": "support",
+        "source_id": "7",
+        "group_id": "router",
+    }
+
+
+def test_validate_reports_documents_sources_and_groups(tmp_path: Path) -> None:
+    path = tmp_path / "pairs.jsonl"
+    rows = [
+        {"query": "q1", "positive": "p", "source": "a", "source_id": "1"},
+        {"query": "q2", "positive": "p", "source": "a", "source_id": "1"},
+        {
+            "query": "q3",
+            "positive": "p2",
+            "source": "b",
+            "source_id": "2",
+            "group_id": "g",
+        },
+    ]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert validate_pairs(path) == {
+        "pairs": 3,
+        "unique_documents": 2,
+        "unique_groups": 2,
+        "sources": {"a": 2, "b": 1},
+    }
+
+
+def test_prepare_rejects_empty_text(tmp_path: Path) -> None:
+    source = tmp_path / "source.jsonl"
+    source.write_text('{"id": 1, "query": "", "positive": "document"}\n')
+    with pytest.raises(ValueError, match="empty query"):
+        prepare_pairs(source, tmp_path / "pairs.jsonl")
