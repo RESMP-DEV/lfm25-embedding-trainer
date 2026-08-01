@@ -178,7 +178,7 @@ def train(
                 "accelerator": encoder.accelerator,
                 "fused_optimizer": fused_optimizer,
             },
-            tags=["embedding-training", "lfm2.5-encoder", "contrastive"],
+            tags=["embedding-training", "lfm2.5-embedding", "contrastive"],
             job_type="train",
         )
     accumulated_loss = 0.0
@@ -193,8 +193,12 @@ def train(
                     dtype=amp_dtype,
                     enabled=config.precision in {"fp16", "bf16"},
                 ):
-                    query_embeddings = encoder.encode_torch(queries, config.max_length)
-                    positive_embeddings = encoder.encode_torch(positives, config.max_length)
+                    query_embeddings = encoder.encode_torch(
+                        queries, config.max_length, prompt_name="query"
+                    )
+                    positive_embeddings = encoder.encode_torch(
+                        positives, config.max_length, prompt_name="document"
+                    )
                     scores = query_embeddings @ positive_embeddings.T / config.temperature
                     raw_loss = _multi_positive_loss(scores, document_keys)
                 accumulated_loss += float(raw_loss.detach().cpu())
@@ -297,6 +301,11 @@ def train(
         "cuda_version": torch.version.cuda,
         "fused_optimizer": fused_optimizer,
         "fp16_overflow_count": overflow_count,
+        "pooling": "cls",
+        "prompts": {
+            "query": encoder.model.prompts["query"],
+            "document": encoder.model.prompts["document"],
+        },
         "accelerator_name": (
             torch.cuda.get_device_name(encoder.device)
             if encoder.device_type == "cuda"

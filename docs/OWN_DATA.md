@@ -78,9 +78,9 @@ come from a later period. Hash splitting alone does not detect temporal memoriza
 Before training, evaluate the exact pinned base revision:
 
 ```bash
-uv run lfm25-embed evaluate LiquidAI/LFM2.5-Encoder-350M \
+uv run lfm25-embed evaluate LiquidAI/LFM2.5-Embedding-350M \
   data/splits/test.jsonl \
-  --revision b886781f7c6f10ca9b7096e21b83e30a073c2f39 \
+  --revision f35ae2c91d687658dbf1f2b449382f0b019b9808 \
   --output artifacts/base.json
 ```
 
@@ -134,9 +134,13 @@ copies words from its positive document while still failing realistic search tra
 
 ## 9. Export and integrate
 
-Use `lfm25-embed embed` to create normalized vectors, then import them into your vector database.
-Use exactly the same checkpoint, pooling, normalization, and maximum-length policy for both the
-indexed documents and live queries.
+Use `lfm25-embed embed --prompt-name document` to create normalized vectors for the index, and use
+`--prompt-name query` for live search inputs. The trainer and evaluator apply these roles
+automatically. Omitting or swapping the checkpoint's asymmetric prompts silently changes retrieval
+behavior.
+
+Use exactly the same checkpoint, native CLS pooling, normalization, and maximum-length policy for
+both indexed documents and live queries. Rebuild the document index whenever any of these changes.
 
 Version the index by checkpoint and corpus hash. Build a new collection for a candidate model,
 validate it, then switch traffic atomically. Keep the previous index available for rollback.

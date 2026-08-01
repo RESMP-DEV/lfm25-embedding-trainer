@@ -1,13 +1,13 @@
 # LFM2.5 Embedding Trainer
 
-Fine-tune [LiquidAI/LFM2.5-Encoder-350M](https://huggingface.co/LiquidAI/LFM2.5-Encoder-350M)
+Fine-tune [LiquidAI/LFM2.5-Embedding-350M](https://huggingface.co/LiquidAI/LFM2.5-Embedding-350M)
 for dense retrieval using your own query-document pairs.
 
 This repository provides a small, auditable training pipeline rather than a framework-specific
 dataset. It includes:
 
 - symmetric multi-positive InfoNCE training;
-- mean pooling and L2-normalized embeddings;
+- the checkpoint's native CLS pooling, asymmetric query/document prompts, and L2 normalization;
 - deterministic document/group-safe train, development, and test splits;
 - Recall@1/5/10 and mean reciprocal rank evaluation;
 - Optuna hyperparameter selection on development MRR;
@@ -31,6 +31,19 @@ PyTorch build rather than the default Linux PyTorch wheel. See [Fine-tuning on A
 
 The FP16 path is live-validated on an 8 GB Radeon RX 5700 (`gfx1010`) with ROCm 7.14 and
 PyTorch 2.12. See the [sanitized hardware receipt](docs/receipts/amd-rx5700-rocm714-smoke.json).
+
+## Why the embedding checkpoint?
+
+`LFM2.5-Encoder-350M` is a bidirectional backbone. `LFM2.5-Embedding-350M` starts from that
+architecture but has already received Liquid's retrieval-specific contrastive, multilingual,
+distillation, and hard-negative training. It also defines the inference contract used by its
+published retrieval results: CLS pooling plus `query: ` and `document: ` prefixes.
+
+This project therefore fine-tunes the **embedding checkpoint**, not the encoder checkpoint.
+Versions `0.1.x` and `0.2.x` incorrectly initialized from `LFM2.5-Encoder-350M`, applied mean
+pooling, and omitted the asymmetric prompts. Version `0.3.0` corrects all three behaviors. Treat
+checkpoints produced by the older path as a separate experiment; they are not drop-in compatible,
+and moving to `0.3.0` requires rebuilding document embeddings.
 
 An end-to-end one-step smoke run (including the real model download and checkpoint save) is:
 
@@ -120,9 +133,9 @@ been benchmarked.
 Compare the pinned base model and tuned checkpoint on the same untouched test set:
 
 ```bash
-uv run lfm25-embed evaluate LiquidAI/LFM2.5-Encoder-350M \
+uv run lfm25-embed evaluate LiquidAI/LFM2.5-Embedding-350M \
   data/splits/test.jsonl \
-  --revision b886781f7c6f10ca9b7096e21b83e30a073c2f39 \
+  --revision f35ae2c91d687658dbf1f2b449382f0b019b9808 \
   --output artifacts/base.json
 
 uv run lfm25-embed evaluate models/lfm25-my-data \
@@ -181,18 +194,25 @@ Command:
 
 ```bash
 uv run lfm25-embed embed models/lfm25-my-data documents.jsonl \
-  --output artifacts/embeddings.jsonl
+  --output artifacts/embeddings.jsonl \
+  --prompt-name document
 ```
 
 Each output row contains the original ID and a normalized floating-point vector. Import that
-JSONL into the vector store of your choice.
+JSONL into the vector store of your choice. Use `--prompt-name query` when embedding live search
+queries; `document` is the default because bulk export normally builds the document index.
 
 ## Implementation notes
 
-The model repository uses custom Transformers code. This project deliberately loads
-`AutoModelForMaskedLM` and trains its populated `.lfm2` backbone, then saves the wrapper and
-tokenizer together. Keep `model_revision` pinned to a reviewed Hugging Face commit because
-`trust_remote_code=True` executes code from that revision.
+The model repository uses Sentence Transformers plus custom Transformers code. This project loads
+the complete embedding package, trains its retrieval-initialized weights through its native CLS
+pooling path, applies the checkpoint's query/document prompts on the correct sides, and saves all
+Sentence Transformers metadata. It also copies Liquid's bidirectional modeling file into each
+checkpoint so a local save remains reloadable.
+
+Keep `model_revision` pinned to a reviewed Hugging Face commit because `trust_remote_code=True`
+executes code from that revision. The current remote code is compatible with Transformers 4.x but
+not Transformers 5.x, so the training extra deliberately constrains `transformers>=4.56,<5`.
 
 In-batch documents are negatives. When several rows in one batch point to the same document,
 all matching columns are treated as positives, avoiding false-negative gradients. Long or
