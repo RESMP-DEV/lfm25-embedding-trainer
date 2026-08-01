@@ -29,6 +29,9 @@ PyTorch selects NVIDIA CUDA, AMD ROCm, Apple MPS, or CPU automatically. PyTorch 
 reports ROCm devices as `cuda`; use `--device cuda` on AMD. ROCm requires a hardware-matched
 PyTorch build rather than the default Linux PyTorch wheel. See [Fine-tuning on AMD ROCm](docs/AMD_ROCM.md).
 
+The FP16 path is live-validated on an 8 GB Radeon RX 5700 (`gfx1010`) with ROCm 7.14 and
+PyTorch 2.12. See the [sanitized hardware receipt](docs/receipts/amd-rx5700-rocm714-smoke.json).
+
 An end-to-end one-step smoke run (including the real model download and checkpoint save) is:
 
 ```bash

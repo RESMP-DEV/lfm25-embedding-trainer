@@ -32,6 +32,7 @@ class TrainConfig:
     max_steps: int | None = None
     log_every_steps: int = 10
     precision: Literal["fp32", "fp16", "bf16"] = "fp32"
+    fp16_initial_scale: float = 128.0
 
     @classmethod
     def load(cls, path: Path) -> TrainConfig:
@@ -134,7 +135,11 @@ def train(
         weight_decay=config.weight_decay,
         fused=fused_optimizer,
     )
-    scaler = torch.amp.GradScaler("cuda", enabled=config.precision == "fp16")
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        enabled=config.precision == "fp16",
+        init_scale=config.fp16_initial_scale,
+    )
     amp_dtype = torch.float16 if config.precision == "fp16" else torch.bfloat16
     available_steps = math.ceil(len(loader) / config.gradient_accumulation_steps) * config.epochs
     update_steps = min(available_steps, config.max_steps or available_steps)
@@ -174,6 +179,7 @@ def train(
             job_type="train",
         )
     accumulated_loss = 0.0
+    overflow_count = 0
     validation_metrics: dict[str, float] = {}
     try:
         for epoch in range(config.epochs):
@@ -199,8 +205,29 @@ def train(
                     continue
                 scaler.unscale_(optimizer)
                 gradient_norm = torch.nn.utils.clip_grad_norm_(encoder.model.parameters(), 1.0)
+                scale_before_step = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
+                if scaler.is_enabled() and scaler.get_scale() < scale_before_step:
+                    overflow_count += 1
+                    accumulated_loss = 0.0
+                    optimizer.zero_grad(set_to_none=True)
+                    print(
+                        json.dumps(
+                            {
+                                "event": "fp16_overflow",
+                                "epoch": epoch + 1,
+                                "batch": batch_index,
+                                "gradient_norm": float(gradient_norm.detach().cpu()),
+                                "previous_scale": scale_before_step,
+                                "new_scale": scaler.get_scale(),
+                            }
+                        ),
+                        flush=True,
+                    )
+                    continue
+                if not torch.isfinite(gradient_norm):
+                    raise FloatingPointError("non-finite gradient norm")
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
                 step += 1
@@ -233,6 +260,8 @@ def train(
                     break
             if step >= update_steps:
                 break
+        if step == 0:
+            raise RuntimeError("training completed without a successful optimizer step")
         if validation_pairs_path is not None:
             from .evaluation import evaluate
 
@@ -264,6 +293,7 @@ def train(
         "hip_version": torch.version.hip,
         "cuda_version": torch.version.cuda,
         "fused_optimizer": fused_optimizer,
+        "fp16_overflow_count": overflow_count,
         "accelerator_name": (
             torch.cuda.get_device_name() if encoder.device == "cuda" else encoder.device
         ),

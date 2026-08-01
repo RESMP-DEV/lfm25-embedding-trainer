@@ -9,6 +9,27 @@ The code changes needed for AMD are therefore small. The environment is the hard
 part: install a ROCm PyTorch build validated for the exact GPU or APU, operating system, Python
 version, and ROCm release.
 
+## Live-validated target
+
+On 2026-08-01, the full one-step path completed on a physical 8 GB Radeon RX 5700
+(`gfx1010:xnack-`) running Ubuntu 26.04, ROCm 7.14, and PyTorch 2.12:
+
+- the model loaded at its pinned revision without an architecture override;
+- FP16 forward, backward, gradient unscale, clipping, and portable AdamW completed;
+- gradient norm was finite at `19.9039249420166` with zero detected overflows;
+- peak allocated/reserved VRAM was 6,295,712,256/6,457,131,008 bytes;
+- all 149 checkpoint tensors changed from the pinned base model; and
+- checkpoint save, reload, and retrieval evaluation completed.
+
+The current AMD multi-architecture wheel contained explicit `gfx1010` runtime and torch-device
+packages even though AMD's consumer compatibility pages emphasize newer cards. Inspect the
+actual package resolver and probe the device; do not infer wheel contents from the marketing
+matrix. The run emitted a non-fatal MIOpen warning about a missing prebuilt gfx1010 database and
+compiled/fell back successfully.
+
+The complete sanitized values are in
+[`docs/receipts/amd-rx5700-rocm714-smoke.json`](receipts/amd-rx5700-rocm714-smoke.json).
+
 ## 1. Verify platform support
 
 Use AMD's current [Radeon and Ryzen compatibility matrix](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibility.html)
@@ -52,15 +73,8 @@ strings.
 Start with the synthetic fixture and one optimizer step before using private data:
 
 ```bash
-cp configs/amd-rocm.toml /tmp/lfm25-amd-smoke.toml
-```
-
-Set `max_steps = 1` and, for a conservative first run, `batch_size = 4` in that temporary
-configuration. Then run:
-
-```bash
 lfm25-embed train examples/pairs.jsonl \
-  --config /tmp/lfm25-amd-smoke.toml \
+  --config configs/amd-rocm-smoke.toml \
   --output models/amd-smoke \
   --validation-pairs examples/pairs.jsonl \
   --device cuda
@@ -80,6 +94,9 @@ Inspect `models/amd-smoke/training_receipt.json`. It should contain:
 
 The trainer uses autocast plus gradient scaling for FP16. It deliberately selects portable
 AdamW on ROCm because fused-optimizer coverage varies by device family and PyTorch build.
+The AMD profiles start with a conservative loss scale of 128. A detected FP16 overflow does
+not count as an optimizer step or advance the learning-rate scheduler; a run with no successful
+update fails instead of emitting a misleading checkpoint receipt.
 
 ## 4. Calibrate the real run
 

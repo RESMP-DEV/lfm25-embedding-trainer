@@ -35,6 +35,7 @@ precision = "bf16"
     assert config.max_steps == 10
     assert config.log_every_steps == 2
     assert config.precision == "bf16"
+    assert config.fp16_initial_scale == 128.0
 
 
 def test_train_config_supports_rocm_fp16(tmp_path: Path) -> None:
@@ -52,9 +53,12 @@ temperature = 0.05
 gradient_accumulation_steps = 1
 seed = 42
 precision = "fp16"
+fp16_initial_scale = 64.0
 """
     )
-    assert TrainConfig.load(path).precision == "fp16"
+    config = TrainConfig.load(path)
+    assert config.precision == "fp16"
+    assert config.fp16_initial_scale == 64.0
 
 
 def test_progress_receipt_is_atomic(tmp_path: Path) -> None:
