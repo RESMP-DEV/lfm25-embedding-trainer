@@ -35,6 +35,24 @@
     "peak_memory_allocated_bytes": 6295712256,
     "peak_memory_reserved_bytes": 6457131008
   },
+  "full_length_capacity_probe": {
+    "sequence_length": 512,
+    "query_and_document_forwards": true,
+    "batch_size_2": {
+      "optimizer_step_completed": true,
+      "loss": 0.5174427032470703,
+      "gradient_norm": 8.859967231750488,
+      "peak_memory_allocated_bytes": 6283121152,
+      "peak_memory_reserved_bytes": 7128219648
+    },
+    "batch_size_3": {
+      "optimizer_step_completed": false,
+      "failure": "out_of_memory",
+      "peak_memory_allocated_bytes": 7915835392,
+      "peak_memory_reserved_bytes": 8143241216
+    },
+    "fitness_claim": false
+  },
   "checkpoint": {
     "sha256": "ec6f6fae52f54de9cb286202c3b7e6cd66fc14442a978501e720ca983c2cdffe",
     "changed_tensors": 149,

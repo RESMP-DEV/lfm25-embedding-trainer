@@ -24,9 +24,14 @@ def accelerator_backend(torch_module: Any, device: str) -> str:
     PyTorch intentionally exposes ROCm devices through the ``cuda`` API.  The
     distinction is still useful for receipts and backend-specific safe defaults.
     """
-    if device == "cuda" and getattr(torch_module.version, "hip", None):
+    if device_type(device) == "cuda" and getattr(torch_module.version, "hip", None):
         return "rocm"
-    return device
+    return device_type(device)
+
+
+def device_type(device: str) -> str:
+    """Return the accelerator type for an optionally indexed device string."""
+    return device.partition(":")[0]
 
 
 class EmbeddingEncoder:
@@ -38,6 +43,7 @@ class EmbeddingEncoder:
 
         self.torch = torch
         self.device = resolve_device(device)
+        self.device_type = device_type(self.device)
         self.accelerator = accelerator_backend(torch, self.device)
         self.tokenizer = cast(
             Any,

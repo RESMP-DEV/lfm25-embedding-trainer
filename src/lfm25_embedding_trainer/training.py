@@ -117,13 +117,16 @@ def train(
     pairs = _load_pairs(pairs_path)
     loader = DataLoader(cast(Any, pairs), batch_size=config.batch_size, shuffle=True)
     encoder = EmbeddingEncoder(config.model_id, config.model_revision, device)
-    if config.precision in {"fp16", "bf16"} and encoder.device != "cuda":
+    if config.precision in {"fp16", "bf16"} and encoder.device_type != "cuda":
         raise ValueError("fp16 and bf16 training require a CUDA or ROCm device")
-    if config.precision == "bf16" and not torch.cuda.is_bf16_supported():
-        raise ValueError("bf16 is not supported by this device; use fp16 or fp32")
-    if encoder.device == "cuda":
+    if config.precision == "bf16":
+        with torch.cuda.device(encoder.device):
+            bf16_supported = torch.cuda.is_bf16_supported()
+        if not bf16_supported:
+            raise ValueError("bf16 is not supported by this device; use fp16 or fp32")
+    if encoder.device_type == "cuda":
         torch.set_float32_matmul_precision("high")
-        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.reset_peak_memory_stats(encoder.device)
     encoder.model.train()
     # Fused AdamW is a useful NVIDIA default, but its support varies across
     # ROCm device families and PyTorch builds. Prefer the portable implementation
@@ -186,7 +189,7 @@ def train(
             for batch_index, batch in enumerate(loader, 1):
                 queries, positives, document_keys = list(batch[0]), list(batch[1]), list(batch[2])
                 with torch.autocast(
-                    device_type=encoder.device,
+                    device_type=encoder.device_type,
                     dtype=amp_dtype,
                     enabled=config.precision in {"fp16", "bf16"},
                 ):
@@ -295,13 +298,19 @@ def train(
         "fused_optimizer": fused_optimizer,
         "fp16_overflow_count": overflow_count,
         "accelerator_name": (
-            torch.cuda.get_device_name() if encoder.device == "cuda" else encoder.device
+            torch.cuda.get_device_name(encoder.device)
+            if encoder.device_type == "cuda"
+            else encoder.device
         ),
         "peak_memory_allocated_bytes": (
-            torch.cuda.max_memory_allocated() if encoder.device == "cuda" else None
+            torch.cuda.max_memory_allocated(encoder.device)
+            if encoder.device_type == "cuda"
+            else None
         ),
         "peak_memory_reserved_bytes": (
-            torch.cuda.max_memory_reserved() if encoder.device == "cuda" else None
+            torch.cuda.max_memory_reserved(encoder.device)
+            if encoder.device_type == "cuda"
+            else None
         ),
         "tracking": asdict(tracking),
         "wandb_run_id": getattr(run, "id", None),

@@ -21,6 +21,12 @@ On 2026-08-01, the full one-step path completed on a physical 8 GB Radeon RX 570
 - all 149 checkpoint tensors changed from the pinned base model; and
 - checkpoint save, reload, and retrieval evaluation completed.
 
+A second capacity probe used actual `[batch, 512]` token tensors for both query and document
+forwards. Batch size 2 completed an FP16 optimizer step with 7,128,219,648 bytes peak reserved;
+batch size 3 exhausted the 8 GB card at 8,143,241,216 bytes peak reserved. The conservative
+`configs/amd-rocm.toml` profile therefore starts at the largest physically validated full-length
+batch, 2. Scale upward only after probing the target card with representative sequence lengths.
+
 The current AMD multi-architecture wheel contained explicit `gfx1010` runtime and torch-device
 packages even though AMD's consumer compatibility pages emphasize newer cards. Inspect the
 actual package resolver and probe the device; do not infer wheel contents from the marketing
@@ -100,7 +106,10 @@ update fails instead of emitting a misleading checkpoint receipt.
 
 ## 4. Calibrate the real run
 
-Increase batch size against representative maximum-length examples, not only short smoke data.
+The conservative profile uses batch size 2 because that is the largest full-length batch validated
+on the documented 8 GB RX 5700. Increase it against representative maximum-length examples, not
+only short smoke data. Contrastive learning benefits from more in-batch negatives, so prefer a
+larger physical batch when the target has enough memory.
 Record at least:
 
 - device name, OS, ROCm, HIP, and PyTorch versions;
