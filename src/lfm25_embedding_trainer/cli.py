@@ -6,7 +6,7 @@ from typing import Annotated
 
 import typer
 
-from .data import prepare_pairs, read_jsonl, validate_pairs
+from .data import link_retrieval_pairs, prepare_pairs, read_jsonl, validate_pairs
 from .evaluation import evaluate as evaluate_model
 from .modeling import EmbeddingEncoder
 from .splitting import sample_pairs_by_source, split_pairs
@@ -46,6 +46,33 @@ def prepare(
 def validate(input_path: Path) -> None:
     """Validate pair fields and report dataset statistics."""
     typer.echo(json.dumps(validate_pairs(input_path), indent=2))
+
+
+@app.command("link")
+def link(
+    queries: Path,
+    documents: Path,
+    output: Path = Path("data/pairs.jsonl"),
+    query_field: str = "query",
+    positive_ids_field: str = "positive_ids",
+    document_id_field: str = "id",
+    text_field: str = "text",
+    group_field: str | None = "group_id",
+    source: str = "default",
+) -> None:
+    """Join labeled queries to a separate document corpus by stable document ID."""
+    count = link_retrieval_pairs(
+        queries,
+        documents,
+        output,
+        query_field=query_field,
+        positive_ids_field=positive_ids_field,
+        document_id_field=document_id_field,
+        text_field=text_field,
+        group_field=group_field,
+        source=source,
+    )
+    typer.echo(f"wrote {count} pairs to {output}")
 
 
 @app.command("split")

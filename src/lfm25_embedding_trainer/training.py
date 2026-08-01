@@ -64,24 +64,31 @@ def _write_progress(path: Path, payload: dict[str, Any]) -> None:
     partial.replace(path)
 
 
-def _load_pairs(path: Path) -> list[tuple[str, str, str]]:
+def _load_pairs(path: Path) -> list[tuple[str, str, str, str]]:
     pairs = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             row = json.loads(line)
+            query_key = f"{row['source']}:{row.get('query_id') or row['query']}"
             document_key = f"{row['source']}:{row['source_id']}"
-            pairs.append((row["query"], row["positive"], document_key))
+            pairs.append((row["query"], row["positive"], query_key, document_key))
     if not pairs:
         raise ValueError("training pair file is empty")
     return pairs
 
 
-def _multi_positive_loss(scores, document_keys: list[str]):
-    """InfoNCE where repeated pseudo-queries for one document are all positives."""
+def _multi_positive_loss(scores, query_keys: list[str], document_keys: list[str]):
+    """InfoNCE that preserves known many-to-many query/document relevance."""
     import torch
 
     positive_mask = torch.tensor(
-        [[left == right for right in document_keys] for left in document_keys],
+        [
+            [
+                left_query == right_query or left_document == right_document
+                for right_query, right_document in zip(query_keys, document_keys, strict=True)
+            ]
+            for left_query, left_document in zip(query_keys, document_keys, strict=True)
+        ],
         dtype=torch.bool,
         device=scores.device,
     )
@@ -187,7 +194,10 @@ def train(
     try:
         for epoch in range(config.epochs):
             for batch_index, batch in enumerate(loader, 1):
-                queries, positives, document_keys = list(batch[0]), list(batch[1]), list(batch[2])
+                queries = list(batch[0])
+                positives = list(batch[1])
+                query_keys = list(batch[2])
+                document_keys = list(batch[3])
                 with torch.autocast(
                     device_type=encoder.device_type,
                     dtype=amp_dtype,
@@ -200,7 +210,7 @@ def train(
                         positives, config.max_length, prompt_name="document"
                     )
                     scores = query_embeddings @ positive_embeddings.T / config.temperature
-                    raw_loss = _multi_positive_loss(scores, document_keys)
+                    raw_loss = _multi_positive_loss(scores, query_keys, document_keys)
                 accumulated_loss += float(raw_loss.detach().cpu())
                 loss = raw_loss / config.gradient_accumulation_steps
                 scaler.scale(loss).backward()

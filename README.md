@@ -32,6 +32,11 @@ PyTorch build rather than the default Linux PyTorch wheel. See [Fine-tuning on A
 The FP16 path is live-validated on an 8 GB Radeon RX 5700 (`gfx1010`) with ROCm 7.14 and
 PyTorch 2.12. See the [sanitized hardware receipt](docs/receipts/amd-rx5700-rocm714-smoke.json).
 
+An optional NVIDIA container workflow is provided for users who prefer a frozen image over a
+native environment. See [Training with NVIDIA Docker](docs/DOCKER.md). Docker is not required.
+CUDA model loading and embedding export are live-validated on a 24 GB RTX 3090 Ti; see the
+[sanitized container receipt](docs/receipts/nvidia-rtx3090ti-cuda-container.json).
+
 ## Why the embedding checkpoint?
 
 `LFM2.5-Encoder-350M` is a bidirectional backbone. `LFM2.5-Embedding-350M` starts from that
@@ -82,6 +87,13 @@ uv run lfm25-embed prepare my-data.jsonl \
   --group-field parent_document_id
 
 uv run lfm25-embed validate data/pairs.jsonl
+```
+
+If queries and documents are stored separately, link relevance labels by stable document ID:
+
+```bash
+uv run lfm25-embed link queries.jsonl documents.jsonl \
+  --output data/pairs.jsonl --source my-dataset
 ```
 
 See [Training on your own data](docs/OWN_DATA.md) for dataset construction and evaluation
@@ -211,8 +223,9 @@ Sentence Transformers metadata. It also copies Liquid's bidirectional modeling f
 checkpoint so a local save remains reloadable.
 
 Keep `model_revision` pinned to a reviewed Hugging Face commit because `trust_remote_code=True`
-executes code from that revision. The current remote code is compatible with Transformers 4.x but
-not Transformers 5.x, so the training extra deliberately constrains `transformers>=4.56,<5`.
+executes code from that revision. Version `0.4.0` requires Transformers 5.5 or newer after the
+pinned checkpoint was live-verified on Transformers 5.14.1; this also avoids known model-loading
+vulnerabilities in older Transformers releases.
 
 In-batch documents are negatives. When several rows in one batch point to the same document,
 all matching columns are treated as positives, avoiding false-negative gradients. Long or

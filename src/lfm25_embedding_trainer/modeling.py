@@ -10,6 +10,43 @@ import numpy as np
 PromptName = Literal["query", "document"]
 
 
+def _patch_shortconv_seq_idx(model: Any) -> bool:
+    """Adapt Liquid's pinned non-causal short-conv patch to Transformers 5.x."""
+    shortconv_type = next(
+        (type(module) for module in model.modules() if type(module).__name__ == "Lfm2ShortConv"),
+        None,
+    )
+    if shortconv_type is None:
+        raise ValueError("embedding checkpoint does not contain an Lfm2ShortConv module")
+    slow_forward = shortconv_type.slow_forward
+    if "seq_idx" in inspect.signature(slow_forward).parameters:
+        return False
+
+    def compatible_slow_forward(self, *args, seq_idx=None, **kwargs):
+        del seq_idx
+        return slow_forward(self, *args, **kwargs)
+
+    shortconv_type.slow_forward = compatible_slow_forward
+    return True
+
+
+def _copy_compatible_remote_code(source: Path, destination: Path) -> None:
+    code = source.read_text(encoding="utf-8")
+    function_start = code.find("def _noncausal_shortconv_forward(")
+    function_end = code.find(") -> torch.Tensor:", function_start)
+    if function_start < 0 or function_end < 0:
+        raise ValueError("unexpected LFM2 remote-code layout")
+    signature = code[function_start:function_end]
+    if "seq_idx" not in signature:
+        marker = "    attention_mask: Optional[torch.Tensor] = None,\n"
+        marker_at = code.find(marker, function_start, function_end)
+        if marker_at < 0:
+            raise ValueError("cannot add Transformers 5.x seq_idx compatibility to remote code")
+        insert_at = marker_at + len(marker)
+        code = code[:insert_at] + "    seq_idx=None,\n" + code[insert_at:]
+    destination.write_text(code, encoding="utf-8")
+
+
 def resolve_device(requested: str) -> str:
     import torch
 
@@ -55,6 +92,7 @@ class EmbeddingEncoder:
             trust_remote_code=True,
             device=self.device,
         )
+        _patch_shortconv_seq_idx(self.model)
         maximum_length = self.model.max_seq_length
         if maximum_length is None:
             raise ValueError("embedding checkpoint does not declare a maximum sequence length")
@@ -105,6 +143,11 @@ class EmbeddingEncoder:
 
     def save(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
+        # Training may deliberately truncate batches below the architecture limit.
+        # Do not persist that transient value as the checkpoint's maximum length.
+        self.model.max_seq_length = self.maximum_length
         self.model.save_pretrained(str(directory), safe_serialization=True)
         remote_code = Path(inspect.getfile(self.model[0].auto_model.__class__))
-        shutil.copy2(remote_code, directory / "modeling_lfm2_bidirectional.py")
+        destination = directory / "modeling_lfm2_bidirectional.py"
+        _copy_compatible_remote_code(remote_code, destination)
+        shutil.copystat(remote_code, destination)

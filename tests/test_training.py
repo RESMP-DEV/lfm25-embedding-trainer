@@ -7,7 +7,18 @@ from lfm25_embedding_trainer.training import TrainConfig, _multi_positive_loss, 
 
 def test_multi_positive_loss_accepts_duplicate_documents() -> None:
     scores = torch.tensor([[4.0, 4.0, 0.0], [4.0, 4.0, 0.0], [0.0, 0.0, 4.0]])
-    duplicate_aware = _multi_positive_loss(scores, ["same", "same", "other"])
+    duplicate_aware = _multi_positive_loss(
+        scores, ["q1", "q2", "q3"], ["same", "same", "other"]
+    )
+    single_positive = torch.nn.functional.cross_entropy(scores, torch.arange(3))
+    assert duplicate_aware < single_positive
+
+
+def test_multi_positive_loss_accepts_multiple_documents_for_one_query() -> None:
+    scores = torch.tensor([[4.0, 4.0, 0.0], [4.0, 4.0, 0.0], [0.0, 0.0, 4.0]])
+    duplicate_aware = _multi_positive_loss(
+        scores, ["same", "same", "other"], ["d1", "d2", "d3"]
+    )
     single_positive = torch.nn.functional.cross_entropy(scores, torch.arange(3))
     assert duplicate_aware < single_positive
 

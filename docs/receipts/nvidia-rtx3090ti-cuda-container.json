@@ -1,0 +1,49 @@
+{
+  "observed_at": "2026-08-01",
+  "scope": "containerized CUDA model-load and embedding-forward validation",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "compute_capability": "8.6",
+    "vram_mib": 24564,
+    "driver": "595.84"
+  },
+  "container": {
+    "image_id": "sha256:d3755e221379c85589a0935ff97a3fbf8ecd60c8548f53c937e96ce4b849fc92",
+    "architecture": "amd64",
+    "size_bytes": 2997782340,
+    "user": "trainer",
+    "docker": "29.7.1",
+    "compose": "5.3.1",
+    "nvidia_container_toolkit": "1.19.1"
+  },
+  "software": {
+    "torch": "2.13.0+cu130",
+    "cuda_runtime": "13.0",
+    "transformers": "5.14.1",
+    "sentence_transformers": "5.6.1",
+    "bf16_supported": true
+  },
+  "model": {
+    "id": "LiquidAI/LFM2.5-Embedding-350M",
+    "revision": "f35ae2c91d687658dbf1f2b449382f0b019b9808",
+    "input_documents": 3,
+    "output_embeddings": 3,
+    "embedding_dimension": 1024,
+    "max_length": 64,
+    "prompt_name": "document"
+  },
+  "checks": {
+    "gpu_visible_inside_plain_ubuntu_container": true,
+    "pinned_model_loaded": true,
+    "transformers_5_shortconv_compatibility_path_executed": true,
+    "triton_runtime_compile_succeeded": true,
+    "cuda_embedding_forward_succeeded": true,
+    "concurrent_unrelated_process_preserved": true
+  },
+  "not_claimed": [
+    "full optimizer step in this final container image",
+    "maximum safe training batch size",
+    "retrieval-quality improvement"
+  ],
+  "note": "A pre-existing process grew to 23931 MiB and 100% GPU utilization after the embedding-forward check. It was not interrupted; optimizer validation was deferred rather than risking that workload."
+}

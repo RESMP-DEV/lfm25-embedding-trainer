@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lfm25_embedding_trainer.data import prepare_pairs, validate_pairs
+from lfm25_embedding_trainer.data import link_retrieval_pairs, prepare_pairs, validate_pairs
 
 
 def test_prepare_maps_custom_fields_and_groups(tmp_path: Path) -> None:
@@ -69,3 +69,52 @@ def test_prepare_rejects_empty_text(tmp_path: Path) -> None:
     source.write_text('{"id": 1, "query": "", "positive": "document"}\n')
     with pytest.raises(ValueError, match="empty query"):
         prepare_pairs(source, tmp_path / "pairs.jsonl")
+
+
+def test_link_retrieval_pairs_joins_documents_and_preserves_groups(tmp_path: Path) -> None:
+    documents = tmp_path / "documents.jsonl"
+    documents.write_text(
+        '\n'.join(
+            [
+                json.dumps({"id": "a:1", "text": "First chunk", "group_id": "manual-a"}),
+                json.dumps({"id": "a:2", "text": "Second chunk", "group_id": "manual-a"}),
+            ]
+        )
+        + "\n"
+    )
+    queries = tmp_path / "queries.jsonl"
+    queries.write_text(
+        json.dumps({"query": "How does A work?", "positive_ids": ["a:1", "a:2", "a:1"]})
+        + "\n"
+    )
+    output = tmp_path / "pairs.jsonl"
+
+    assert link_retrieval_pairs(queries, documents, output, source="manuals") == 2
+    assert [json.loads(line) for line in output.read_text().splitlines()] == [
+        {
+            "query": "How does A work?",
+            "query_id": "How does A work?",
+            "positive": "First chunk",
+            "source": "manuals",
+            "source_id": "a:1",
+            "group_id": "manual-a",
+        },
+        {
+            "query": "How does A work?",
+            "query_id": "How does A work?",
+            "positive": "Second chunk",
+            "source": "manuals",
+            "source_id": "a:2",
+            "group_id": "manual-a",
+        },
+    ]
+
+
+def test_link_retrieval_pairs_rejects_unknown_document(tmp_path: Path) -> None:
+    documents = tmp_path / "documents.jsonl"
+    documents.write_text('{"id":"known","text":"Known document"}\n')
+    queries = tmp_path / "queries.jsonl"
+    queries.write_text('{"query":"q","positive_ids":["missing"]}\n')
+
+    with pytest.raises(ValueError, match="unknown document ID 'missing'"):
+        link_retrieval_pairs(queries, documents, tmp_path / "pairs.jsonl")

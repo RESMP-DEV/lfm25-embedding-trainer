@@ -68,6 +68,89 @@ def prepare_pairs(
     return count
 
 
+def link_retrieval_pairs(
+    queries_path: Path,
+    documents_path: Path,
+    output_path: Path,
+    *,
+    query_field: str = "query",
+    positive_ids_field: str = "positive_ids",
+    document_id_field: str = "id",
+    text_field: str = "text",
+    group_field: str | None = "group_id",
+    source: str = "default",
+) -> int:
+    """Join query relevance labels to a separate document corpus by stable ID."""
+    documents: dict[str, tuple[str, str]] = {}
+    for line_number, row in enumerate(read_jsonl(documents_path), 1):
+        try:
+            document_id = str(row[document_id_field])
+            text = row[text_field]
+        except KeyError as exc:
+            raise ValueError(
+                f"document row {line_number} is missing field {exc.args[0]!r}"
+            ) from exc
+        if document_id in documents:
+            raise ValueError(f"duplicate document ID {document_id!r}")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(f"document row {line_number} has empty text")
+        group_id = document_id
+        if group_field is not None and row.get(group_field) is not None:
+            group_id = str(row[group_field])
+        documents[document_id] = (text, group_id)
+    if not documents:
+        raise ValueError("document corpus is empty")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with output_path.open("w", encoding="utf-8") as output:
+        for line_number, row in enumerate(read_jsonl(queries_path), 1):
+            try:
+                query = row[query_field]
+                positive_ids = row[positive_ids_field]
+            except KeyError as exc:
+                raise ValueError(
+                    f"query row {line_number} is missing field {exc.args[0]!r}"
+                ) from exc
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError(f"query row {line_number} has an empty query")
+            query_id = str(row.get("id") or query)
+            if not isinstance(positive_ids, list) or not positive_ids:
+                raise ValueError(
+                    f"query row {line_number} field {positive_ids_field!r} "
+                    "must be a non-empty list"
+                )
+            seen_ids: set[str] = set()
+            for raw_document_id in positive_ids:
+                document_id = str(raw_document_id)
+                if document_id in seen_ids:
+                    continue
+                seen_ids.add(document_id)
+                if document_id not in documents:
+                    raise ValueError(
+                        f"query row {line_number} references unknown document ID {document_id!r}"
+                    )
+                positive, group_id = documents[document_id]
+                output.write(
+                    json.dumps(
+                        {
+                            "query": query,
+                            "query_id": query_id,
+                            "positive": positive,
+                            "source": source,
+                            "source_id": document_id,
+                            "group_id": group_id,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                count += 1
+    if count == 0:
+        raise ValueError("query dataset is empty")
+    return count
+
+
 def validate_pairs(path: Path) -> dict[str, Any]:
     sources: Counter[str] = Counter()
     document_keys: set[tuple[str, str]] = set()

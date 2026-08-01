@@ -1,0 +1,15 @@
+services:
+  trainer:
+    build:
+      context: .
+    image: lfm25-embedding-trainer:local
+    gpus: all
+    environment:
+      HF_HOME: /home/trainer/.cache/huggingface
+      WANDB_API_KEY: ${WANDB_API_KEY:-}
+    volumes:
+      - .:/workspace
+      - huggingface-cache:/home/trainer/.cache/huggingface
+
+volumes:
+  huggingface-cache:
