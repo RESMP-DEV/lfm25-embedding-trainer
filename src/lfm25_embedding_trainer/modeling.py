@@ -18,6 +18,22 @@ def resolve_device(requested: str) -> str:
     return "cpu"
 
 
+def accelerator_backend(torch_module: Any, device: str) -> str:
+    """Return the physical accelerator while retaining PyTorch's device spelling.
+
+    PyTorch intentionally exposes ROCm devices through the ``cuda`` API.  The
+    distinction is still useful for receipts and backend-specific safe defaults.
+    """
+    if device_type(device) == "cuda" and getattr(torch_module.version, "hip", None):
+        return "rocm"
+    return device_type(device)
+
+
+def device_type(device: str) -> str:
+    """Return the accelerator type for an optionally indexed device string."""
+    return device.partition(":")[0]
+
+
 class EmbeddingEncoder:
     """Mean-pooled, L2-normalized LFM2.5 encoder wrapper."""
 
@@ -27,6 +43,8 @@ class EmbeddingEncoder:
 
         self.torch = torch
         self.device = resolve_device(device)
+        self.device_type = device_type(self.device)
+        self.accelerator = accelerator_backend(torch, self.device)
         self.tokenizer = cast(
             Any,
             AutoTokenizer.from_pretrained(model_id, revision=revision, trust_remote_code=True),

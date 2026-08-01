@@ -1,0 +1,74 @@
+{
+  "kind": "one-step-training-smoke",
+  "date": "2026-08-01",
+  "hardware": {
+    "accelerator_name": "AMD Radeon RX 5700",
+    "architecture": "gfx1010:xnack-",
+    "vram_bytes": 8573157376
+  },
+  "software": {
+    "os": "Ubuntu 26.04",
+    "kernel": "7.0.0-28-generic",
+    "python": "3.13.14",
+    "torch": "2.12.0+rocm7.14.0",
+    "hip": "7.14.60850",
+    "transformers": "5.14.1"
+  },
+  "model": {
+    "id": "LiquidAI/LFM2.5-Encoder-350M",
+    "revision": "b886781f7c6f10ca9b7096e21b83e30a073c2f39"
+  },
+  "configuration": {
+    "precision": "fp16",
+    "fp16_initial_scale": 128.0,
+    "batch_size": 6,
+    "max_length": 64,
+    "optimizer": "AdamW",
+    "fused_optimizer": false
+  },
+  "training": {
+    "optimizer_steps": 1,
+    "loss": 0.5588746070861816,
+    "gradient_norm": 19.9039249420166,
+    "fp16_overflow_count": 0,
+    "steps_per_second_after_initialization": 0.7483888960749843,
+    "peak_memory_allocated_bytes": 6295712256,
+    "peak_memory_reserved_bytes": 6457131008
+  },
+  "full_length_capacity_probe": {
+    "sequence_length": 512,
+    "query_and_document_forwards": true,
+    "batch_size_2": {
+      "optimizer_step_completed": true,
+      "loss": 0.5174427032470703,
+      "gradient_norm": 8.859967231750488,
+      "peak_memory_allocated_bytes": 6283121152,
+      "peak_memory_reserved_bytes": 7128219648
+    },
+    "batch_size_3": {
+      "optimizer_step_completed": false,
+      "failure": "out_of_memory",
+      "peak_memory_allocated_bytes": 7915835392,
+      "peak_memory_reserved_bytes": 8143241216
+    },
+    "fitness_claim": false
+  },
+  "checkpoint": {
+    "sha256": "ec6f6fae52f54de9cb286202c3b7e6cd66fc14442a978501e720ca983c2cdffe",
+    "changed_tensors": 149,
+    "total_tensors": 149,
+    "max_abs_delta": 0.000027418136596679688
+  },
+  "synthetic_fixture_evaluation": {
+    "queries": 6,
+    "mrr": 1.0,
+    "recall_at_1": 1.0,
+    "recall_at_5": 1.0,
+    "recall_at_10": 1.0,
+    "fitness_claim": false
+  },
+  "notes": [
+    "The synthetic fixture validates execution, not production retrieval quality.",
+    "MIOpen reported a missing prebuilt gfx1010 database and used a working fallback path."
+  ]
+}

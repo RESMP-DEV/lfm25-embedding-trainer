@@ -1,6 +1,6 @@
 [project]
 name = "lfm25-embedding-trainer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fine-tune LiquidAI LFM2.5 Encoder models on your own retrieval pairs"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
