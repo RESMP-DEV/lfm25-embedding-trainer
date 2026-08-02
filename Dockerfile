@@ -15,8 +15,11 @@ ENV HF_HOME=/home/trainer/.cache/huggingface \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 
-RUN groupadd --gid 1000 trainer \
-    && useradd --uid 1000 --gid 1000 --create-home trainer \
+ARG TRAINER_UID=1000
+ARG TRAINER_GID=1000
+
+RUN groupadd --non-unique --gid "${TRAINER_GID}" trainer \
+    && useradd --non-unique --uid "${TRAINER_UID}" --gid trainer --create-home trainer \
     && mkdir -p /workspace "$HF_HOME" \
     && chown -R trainer:trainer /workspace /home/trainer
 
@@ -25,12 +28,12 @@ WORKDIR /workspace
 COPY --chown=trainer:trainer pyproject.toml uv.lock README.md ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra train --no-install-project
+    uv sync --locked --no-dev --extra train --no-install-project
 
 COPY --chown=trainer:trainer src ./src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra train
+    uv sync --locked --no-dev --extra train
 
 USER trainer
 

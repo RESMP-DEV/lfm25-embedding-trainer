@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import ast
+import copy
 import inspect
+import io
 import shutil
+import tokenize
 from pathlib import Path
+from types import MethodType
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -12,38 +17,107 @@ PromptName = Literal["query", "document"]
 
 def _patch_shortconv_seq_idx(model: Any) -> bool:
     """Adapt Liquid's pinned non-causal short-conv patch to Transformers 5.x."""
-    shortconv_type = next(
-        (type(module) for module in model.modules() if type(module).__name__ == "Lfm2ShortConv"),
+    from transformers.models.lfm2.modeling_lfm2 import Lfm2ShortConv
+
+    shortconv_modules = [module for module in model.modules() if isinstance(module, Lfm2ShortConv)]
+    if not shortconv_modules:
+        raise ValueError("embedding checkpoint does not contain an Lfm2ShortConv module")
+    patched = False
+    for module in shortconv_modules:
+        slow_forward = module.slow_forward
+        if "seq_idx" in inspect.signature(slow_forward).parameters:
+            continue
+
+        def compatible_slow_forward(
+            self, *args, seq_idx=None, _slow_forward=slow_forward, **kwargs
+        ):
+            del self, seq_idx
+            return _slow_forward(*args, **kwargs)
+
+        module.slow_forward = MethodType(compatible_slow_forward, module)
+        patched = True
+    return patched
+
+
+def _source_offset(code: str, position: tuple[int, int]) -> int:
+    lines = code.splitlines(keepends=True)
+    return sum(len(line) for line in lines[: position[0] - 1]) + position[1]
+
+
+def _signature_span(code: str, function: ast.FunctionDef) -> tuple[int, int]:
+    tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
+    function_index = next(
+        (
+            index
+            for index, token in enumerate(tokens)
+            if token.type == tokenize.NAME
+            and token.string == "def"
+            and token.start == (function.lineno, function.col_offset)
+        ),
         None,
     )
-    if shortconv_type is None:
-        raise ValueError("embedding checkpoint does not contain an Lfm2ShortConv module")
-    slow_forward = shortconv_type.slow_forward
-    if "seq_idx" in inspect.signature(slow_forward).parameters:
-        return False
-
-    def compatible_slow_forward(self, *args, seq_idx=None, **kwargs):
-        del seq_idx
-        return slow_forward(self, *args, **kwargs)
-
-    shortconv_type.slow_forward = compatible_slow_forward
-    return True
+    if function_index is None:
+        raise ValueError("cannot locate the remote-code function signature")
+    depth = 0
+    opened = False
+    for token in tokens[function_index:]:
+        if token.type != tokenize.OP:
+            continue
+        if token.string in "([{":
+            depth += 1
+            opened = True
+        elif token.string in ")]}":
+            depth -= 1
+        elif token.string == ":" and opened and depth == 0:
+            return (
+                _source_offset(code, tokens[function_index].start),
+                _source_offset(code, token.end),
+            )
+    raise ValueError("cannot locate the end of the remote-code function signature")
 
 
 def _copy_compatible_remote_code(source: Path, destination: Path) -> None:
     code = source.read_text(encoding="utf-8")
-    function_start = code.find("def _noncausal_shortconv_forward(")
-    function_end = code.find(") -> torch.Tensor:", function_start)
-    if function_start < 0 or function_end < 0:
-        raise ValueError("unexpected LFM2 remote-code layout")
-    signature = code[function_start:function_end]
-    if "seq_idx" not in signature:
-        marker = "    attention_mask: Optional[torch.Tensor] = None,\n"
-        marker_at = code.find(marker, function_start, function_end)
-        if marker_at < 0:
-            raise ValueError("cannot add Transformers 5.x seq_idx compatibility to remote code")
-        insert_at = marker_at + len(marker)
-        code = code[:insert_at] + "    seq_idx=None,\n" + code[insert_at:]
+    try:
+        tree = ast.parse(code, filename=str(source))
+    except SyntaxError as exc:
+        raise ValueError(f"cannot parse pinned LFM2 remote code at {source}") from exc
+    functions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_noncausal_shortconv_forward"
+    ]
+    if len(functions) != 1:
+        raise ValueError(
+            "pinned LFM2 remote code must define exactly one _noncausal_shortconv_forward function"
+        )
+    function = functions[0]
+    parameters = {
+        argument.arg
+        for argument in (function.args.posonlyargs + function.args.args + function.args.kwonlyargs)
+    }
+    if "seq_idx" not in parameters:
+        patched_args = copy.deepcopy(function.args)
+        patched_args.kwonlyargs.append(ast.arg(arg="seq_idx"))
+        patched_args.kw_defaults.append(ast.Constant(value=None))
+        signature_node = ast.FunctionDef(
+            name=function.name,
+            args=patched_args,
+            body=[ast.Pass()],
+            decorator_list=[],
+            returns=copy.deepcopy(function.returns),
+            type_comment=None,
+        )
+        signature = ast.unparse(ast.fix_missing_locations(signature_node)).splitlines()[0]
+        start, end = _signature_span(code, function)
+        code = code[:start] + signature + code[end:]
+        try:
+            ast.parse(code, filename=str(destination))
+        except SyntaxError as exc:
+            raise ValueError(
+                "cannot add Transformers 5.x seq_idx compatibility; "
+                "review and pin the LFM2 remote-code revision"
+            ) from exc
     destination.write_text(code, encoding="utf-8")
 
 

@@ -1,3 +1,5 @@
+import ast
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,17 +34,25 @@ def test_indexed_nvidia_device_is_not_mislabeled_as_rocm() -> None:
 
 
 def test_shortconv_patch_ignores_transformers5_seq_idx() -> None:
-    class Lfm2ShortConv:
+    from transformers.models.lfm2.modeling_lfm2 import Lfm2ShortConv
+
+    class LegacyShortConv(Lfm2ShortConv):
+        def __init__(self):
+            pass
+
         def slow_forward(self, value):
             return value + 1
 
+    module = LegacyShortConv()
+
     class Model:
         def modules(self):
-            return [Lfm2ShortConv()]
+            return [module]
 
     assert _patch_shortconv_seq_idx(Model()) is True
-    assert Lfm2ShortConv().slow_forward(2, seq_idx="unused") == 3
+    assert module.slow_forward(2, seq_idx="unused") == 3
     assert _patch_shortconv_seq_idx(Model()) is False
+    assert "seq_idx" not in inspect.signature(LegacyShortConv.slow_forward).parameters
 
 
 def test_saved_remote_code_accepts_seq_idx(tmp_path: Path) -> None:
@@ -56,4 +66,26 @@ def test_saved_remote_code_accepts_seq_idx(tmp_path: Path) -> None:
     )
     destination = tmp_path / "destination.py"
     _copy_compatible_remote_code(source, destination)
-    assert "    seq_idx=None,\n" in destination.read_text()
+    tree = ast.parse(destination.read_text())
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_noncausal_shortconv_forward"
+    )
+    assert [argument.arg for argument in function.args.kwonlyargs] == ["seq_idx"]
+
+
+def test_saved_remote_code_patch_tolerates_signature_formatting(tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_text(
+        "def _noncausal_shortconv_forward(self, hidden_states, attention_mask = None)->object:\n"
+        "    return hidden_states\n"
+    )
+    destination = tmp_path / "destination.py"
+
+    _copy_compatible_remote_code(source, destination)
+
+    namespace: dict[str, object] = {}
+    exec(destination.read_text(), namespace)
+    signature = inspect.signature(namespace["_noncausal_shortconv_forward"])
+    assert signature.parameters["seq_idx"].kind is inspect.Parameter.KEYWORD_ONLY

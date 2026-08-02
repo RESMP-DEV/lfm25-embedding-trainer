@@ -6,7 +6,7 @@ and installs PyTorch's Linux CUDA dependencies; it does not contain an NVIDIA ke
 
 ## Host requirements
 
-- Linux with an NVIDIA GPU and a working host driver (`nvidia-smi` must succeed)
+- Linux with an NVIDIA GPU and NVIDIA driver 580 or newer (`nvidia-smi` must succeed)
 - Docker Engine with Compose
 - NVIDIA Container Toolkit configured for Docker
 
@@ -24,11 +24,17 @@ JIT driver shims.
 ## Build and probe
 
 ```bash
+export TRAINER_UID="$(id -u)"
+export TRAINER_GID="$(id -g)"
 docker compose build trainer
 
 docker compose run --rm --entrypoint python trainer -c \
   'import torch; print(torch.__version__, torch.version.cuda); print(torch.cuda.get_device_name())'
 ```
+
+The build arguments make the container's `trainer` UID and GID match the Linux user that owns
+the bind-mounted checkout. Keep those exports in the shell used for both build and run commands;
+the defaults are 1000 only for hosts where the owning user already has UID/GID 1000.
 
 The source tree is mounted at `/workspace`. The named `huggingface-cache` volume preserves model
 downloads between runs. Training outputs therefore appear directly in the host repository.

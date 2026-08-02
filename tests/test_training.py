@@ -2,25 +2,59 @@ from pathlib import Path
 
 import torch
 
-from lfm25_embedding_trainer.training import TrainConfig, _multi_positive_loss, _write_progress
+from lfm25_embedding_trainer.training import (
+    TrainConfig,
+    _identity_key,
+    _load_pairs,
+    _multi_positive_loss,
+    _positive_mask,
+    _write_progress,
+)
 
 
 def test_multi_positive_loss_accepts_duplicate_documents() -> None:
     scores = torch.tensor([[4.0, 4.0, 0.0], [4.0, 4.0, 0.0], [0.0, 0.0, 4.0]])
-    duplicate_aware = _multi_positive_loss(
-        scores, ["q1", "q2", "q3"], ["same", "same", "other"]
+    duplicate_aware = _multi_positive_loss(scores, ["q1", "q2", "q3"], ["same", "same", "other"])
+    expected_mask = torch.tensor([[True, True, False], [True, True, False], [False, False, True]])
+    assert torch.equal(
+        _positive_mask(["q1", "q2", "q3"], ["same", "same", "other"], device="cpu"),
+        expected_mask,
     )
-    single_positive = torch.nn.functional.cross_entropy(scores, torch.arange(3))
-    assert duplicate_aware < single_positive
+    expected = -torch.logsumexp(
+        torch.log_softmax(scores, dim=1).masked_fill(~expected_mask, -torch.inf), dim=1
+    ).mean()
+    assert torch.allclose(duplicate_aware, expected)
 
 
 def test_multi_positive_loss_accepts_multiple_documents_for_one_query() -> None:
     scores = torch.tensor([[4.0, 4.0, 0.0], [4.0, 4.0, 0.0], [0.0, 0.0, 4.0]])
-    duplicate_aware = _multi_positive_loss(
-        scores, ["same", "same", "other"], ["d1", "d2", "d3"]
+    duplicate_aware = _multi_positive_loss(scores, ["same", "same", "other"], ["d1", "d2", "d3"])
+    expected_mask = torch.tensor([[True, True, False], [True, True, False], [False, False, True]])
+    assert torch.equal(
+        _positive_mask(["same", "same", "other"], ["d1", "d2", "d3"], device="cpu"),
+        expected_mask,
     )
-    single_positive = torch.nn.functional.cross_entropy(scores, torch.arange(3))
-    assert duplicate_aware < single_positive
+    expected = -torch.logsumexp(
+        torch.log_softmax(scores, dim=1).masked_fill(~expected_mask, -torch.inf), dim=1
+    ).mean()
+    assert torch.allclose(duplicate_aware, expected)
+
+
+def test_identity_key_cannot_collide_across_source_namespaces() -> None:
+    assert _identity_key("a", "b:c") != _identity_key("a:b", "c")
+
+
+def test_load_pairs_preserves_falsy_query_id(tmp_path: Path) -> None:
+    path = tmp_path / "pairs.jsonl"
+    path.write_text(
+        '{"query":"same","query_id":0,"positive":"p1","source":"x","source_id":"1"}\n'
+        '{"query":"same","query_id":false,"positive":"p2","source":"x","source_id":"2"}\n'
+    )
+
+    pairs = _load_pairs(path)
+
+    assert pairs[0][2] == _identity_key("x", "0")
+    assert pairs[1][2] == _identity_key("x", "False")
 
 
 def test_train_config_supports_bounded_run(tmp_path: Path) -> None:

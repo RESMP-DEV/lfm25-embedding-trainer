@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 
 import numpy as np
 
+from .data import _query_identifier
 from .modeling import EmbeddingEncoder
 
 
@@ -64,34 +65,52 @@ def _write_progress(path: Path, payload: dict[str, Any]) -> None:
     partial.replace(path)
 
 
+def _identity_key(source: object, identifier: object) -> str:
+    """Encode a namespaced identity without delimiter collisions."""
+    return json.dumps([str(source), str(identifier)], ensure_ascii=False, separators=(",", ":"))
+
+
 def _load_pairs(path: Path) -> list[tuple[str, str, str, str]]:
     pairs = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             row = json.loads(line)
-            query_key = f"{row['source']}:{row.get('query_id') or row['query']}"
-            document_key = f"{row['source']}:{row['source_id']}"
+            query_key = _identity_key(row["source"], _query_identifier(row))
+            document_key = _identity_key(row["source"], row["source_id"])
             pairs.append((row["query"], row["positive"], query_key, document_key))
     if not pairs:
         raise ValueError("training pair file is empty")
     return pairs
 
 
+def _positive_mask(query_keys: list[str], document_keys: list[str], *, device):
+    import torch
+
+    if len(query_keys) != len(document_keys):
+        raise ValueError("query and document key counts must match")
+
+    def group_ids(keys: list[str]):
+        groups: dict[str, int] = {}
+        return torch.tensor(
+            [groups.setdefault(key, len(groups)) for key in keys],
+            dtype=torch.int64,
+            device=device,
+        )
+
+    query_groups = group_ids(query_keys)
+    document_groups = group_ids(document_keys)
+    return (query_groups[:, None] == query_groups[None, :]) | (
+        document_groups[:, None] == document_groups[None, :]
+    )
+
+
 def _multi_positive_loss(scores, query_keys: list[str], document_keys: list[str]):
     """InfoNCE that preserves known many-to-many query/document relevance."""
     import torch
 
-    positive_mask = torch.tensor(
-        [
-            [
-                left_query == right_query or left_document == right_document
-                for right_query, right_document in zip(query_keys, document_keys, strict=True)
-            ]
-            for left_query, left_document in zip(query_keys, document_keys, strict=True)
-        ],
-        dtype=torch.bool,
-        device=scores.device,
-    )
+    if scores.ndim != 2 or scores.shape != (len(query_keys), len(document_keys)):
+        raise ValueError("scores must be square with one row per query/document pair")
+    positive_mask = _positive_mask(query_keys, document_keys, device=scores.device)
 
     def direction(logits, mask):
         log_probabilities = torch.nn.functional.log_softmax(logits, dim=1)

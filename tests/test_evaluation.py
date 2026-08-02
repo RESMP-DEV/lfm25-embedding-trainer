@@ -11,8 +11,10 @@ class FakeEncoder:
     vectors = {
         "document one": [1.0, 0.0],
         "document two": [0.0, 1.0],
+        "document three": [-1.0, 0.0],
         "query one": [1.0, 0.0],
         "query two": [0.0, 1.0],
+        "multi query": [0.0, 1.0],
     }
 
     def __init__(self) -> None:
@@ -49,3 +51,37 @@ def test_evaluate_rejects_empty_file(tmp_path: Path) -> None:
     path.write_text("")
     with pytest.raises(ValueError, match="empty"):
         evaluate(FakeEncoder(), path)
+
+
+def test_evaluate_groups_all_documents_for_one_query_as_relevant(tmp_path: Path) -> None:
+    path = tmp_path / "pairs.jsonl"
+    rows = [
+        {
+            "query": "multi query",
+            "query_id": "multi",
+            "positive": "document one",
+            "source": "x",
+            "source_id": "1",
+        },
+        {
+            "query": "multi query",
+            "query_id": "multi",
+            "positive": "document two",
+            "source": "x",
+            "source_id": "2",
+        },
+        {
+            "query": "query one",
+            "query_id": "other",
+            "positive": "document three",
+            "source": "x",
+            "source_id": "3",
+        },
+    ]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    metrics = evaluate(FakeEncoder(), path)
+
+    assert metrics["queries"] == 2.0
+    assert metrics["recall_at_1"] == 0.5
+    assert metrics["mrr"] == pytest.approx(2 / 3)

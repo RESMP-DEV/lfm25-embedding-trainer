@@ -53,6 +53,42 @@ def test_split_keeps_chunked_article_together(tmp_path: Path) -> None:
     assert len(locations) == 1
 
 
+def test_split_keeps_query_document_group_component_together(tmp_path: Path) -> None:
+    source = tmp_path / "pairs.jsonl"
+    rows = [
+        {
+            "query": "shared query",
+            "query_id": "shared",
+            "positive": "section 1",
+            "source": "journal",
+            "source_id": "article-a:s1",
+            "group_id": "article-a",
+        },
+        {
+            "query": "shared query",
+            "query_id": "shared",
+            "positive": "section 2",
+            "source": "journal",
+            "source_id": "article-b:s1",
+            "group_id": "article-b",
+        },
+        {
+            "query": "related query",
+            "query_id": "related",
+            "positive": "section 3",
+            "source": "journal",
+            "source_id": "article-b:s2",
+            "group_id": "article-b",
+        },
+    ]
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    output = tmp_path / "splits"
+
+    counts = split_pairs(source, output, dev_ratio=0.3, test_ratio=0.3)
+
+    assert sorted(counts.values()) == [0, 0, 3]
+
+
 def test_sample_pairs_is_deterministic_and_stratified(tmp_path: Path) -> None:
     source = tmp_path / "pairs.jsonl"
     rows = [

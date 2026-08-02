@@ -2,8 +2,17 @@ services:
   trainer:
     build:
       context: .
+      args:
+        TRAINER_UID: ${TRAINER_UID:-1000}
+        TRAINER_GID: ${TRAINER_GID:-1000}
     image: lfm25-embedding-trainer:local
-    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       HF_HOME: /home/trainer/.cache/huggingface
       WANDB_API_KEY: ${WANDB_API_KEY:-}
