@@ -8,6 +8,7 @@ from lfm25_embedding_trainer.training import (
     _load_pairs,
     _multi_positive_loss,
     _positive_mask,
+    _relevance_by_query,
     _write_progress,
 )
 
@@ -55,6 +56,23 @@ def test_load_pairs_preserves_falsy_query_id(tmp_path: Path) -> None:
 
     assert pairs[0][2] == _identity_key("x", "0")
     assert pairs[1][2] == _identity_key("x", "False")
+
+
+def test_positive_mask_uses_dataset_edges_without_inventing_transitive_labels() -> None:
+    all_pairs = [
+        ("q1", "d1", "q1", "d1"),
+        ("q1", "d2", "q1", "d2"),
+        ("q2", "d2", "q2", "d2"),
+    ]
+
+    mask = _positive_mask(
+        ["q1", "q2"],
+        ["d1", "d2"],
+        device="cpu",
+        relevance_by_query=_relevance_by_query(all_pairs),
+    )
+
+    assert torch.equal(mask, torch.tensor([[True, True], [False, True]]))
 
 
 def test_train_config_supports_bounded_run(tmp_path: Path) -> None:

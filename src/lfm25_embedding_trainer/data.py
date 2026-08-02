@@ -148,6 +148,8 @@ def link_retrieval_pairs(
         raise ValueError("document corpus is empty")
 
     pairs: list[dict[str, Any]] = []
+    query_text_by_id: dict[str, str] = {}
+    seen_pairs: set[tuple[str, str]] = set()
     for line_number, row in enumerate(read_jsonl(queries_path), 1):
         try:
             query = row[query_field]
@@ -161,6 +163,11 @@ def link_retrieval_pairs(
             if "id" in row and row["id"] is not None
             else query
         )
+        previous_query = query_text_by_id.setdefault(query_id, query)
+        if previous_query != query:
+            raise ValueError(
+                f"query row {line_number} reuses ID {query_id!r} with different query text"
+            )
         if not isinstance(positive_ids, list) or not positive_ids:
             raise ValueError(
                 f"query row {line_number} field {positive_ids_field!r} must be a non-empty list"
@@ -178,6 +185,10 @@ def link_retrieval_pairs(
                 raise ValueError(
                     f"query row {line_number} references unknown document ID {document_id!r}"
                 )
+            pair_key = (query_id, document_id)
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
             positive, group_id = documents[document_id]
             pairs.append(
                 {

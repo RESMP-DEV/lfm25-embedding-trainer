@@ -190,6 +190,9 @@ uv run lfm25-embed sweep data/splits/train.jsonl data/dev-sample.jsonl \
   --wandb-project my-embedding-project
 ```
 
+Sampling keeps every relevance label for a selected query together. `--per-source` is therefore
+a soft row cap: a single query with more linked positives than the cap is retained in full.
+
 The persistent SQLite study and `sweep_summary.json` make selection reproducible. Non-winning
 trial weights are removed after the study; their configurations, receipts, metrics, and W&B
 runs remain.

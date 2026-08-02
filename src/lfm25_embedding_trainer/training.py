@@ -83,34 +83,69 @@ def _load_pairs(path: Path) -> list[tuple[str, str, str, str]]:
     return pairs
 
 
-def _positive_mask(query_keys: list[str], document_keys: list[str], *, device):
+def _relevance_by_query(
+    pairs: list[tuple[str, str, str, str]],
+) -> dict[str, set[str]]:
+    relevance: dict[str, set[str]] = {}
+    for _, _, query_key, document_key in pairs:
+        relevance.setdefault(query_key, set()).add(document_key)
+    return relevance
+
+
+def _positive_mask(
+    query_keys: list[str],
+    document_keys: list[str],
+    *,
+    device,
+    relevance_by_query: dict[str, set[str]] | None = None,
+):
+    """Build known edge labels; shared nodes do not imply transitive relevance."""
     import torch
 
     if len(query_keys) != len(document_keys):
         raise ValueError("query and document key counts must match")
+    if relevance_by_query is None:
+        relevance_by_query = {}
+        for query_key, document_key in zip(query_keys, document_keys, strict=True):
+            relevance_by_query.setdefault(query_key, set()).add(document_key)
 
-    def group_ids(keys: list[str]):
-        groups: dict[str, int] = {}
-        return torch.tensor(
-            [groups.setdefault(key, len(groups)) for key in keys],
-            dtype=torch.int64,
-            device=device,
-        )
+    document_positions: dict[str, list[int]] = {}
+    for index, document_key in enumerate(document_keys):
+        document_positions.setdefault(document_key, []).append(index)
+    row_indices: list[int] = []
+    column_indices: list[int] = []
+    for row_index, query_key in enumerate(query_keys):
+        for document_key in relevance_by_query.get(query_key, set()):
+            for column_index in document_positions.get(document_key, []):
+                row_indices.append(row_index)
+                column_indices.append(column_index)
 
-    query_groups = group_ids(query_keys)
-    document_groups = group_ids(document_keys)
-    return (query_groups[:, None] == query_groups[None, :]) | (
-        document_groups[:, None] == document_groups[None, :]
+    positive_mask = torch.zeros(
+        (len(query_keys), len(document_keys)), dtype=torch.bool, device=device
     )
+    if row_indices:
+        coordinates = torch.tensor([row_indices, column_indices], dtype=torch.int64, device=device)
+        positive_mask[coordinates[0], coordinates[1]] = True
+    return positive_mask
 
 
-def _multi_positive_loss(scores, query_keys: list[str], document_keys: list[str]):
+def _multi_positive_loss(
+    scores,
+    query_keys: list[str],
+    document_keys: list[str],
+    relevance_by_query: dict[str, set[str]] | None = None,
+):
     """InfoNCE that preserves known many-to-many query/document relevance."""
     import torch
 
     if scores.ndim != 2 or scores.shape != (len(query_keys), len(document_keys)):
         raise ValueError("scores must be square with one row per query/document pair")
-    positive_mask = _positive_mask(query_keys, document_keys, device=scores.device)
+    positive_mask = _positive_mask(
+        query_keys,
+        document_keys,
+        device=scores.device,
+        relevance_by_query=relevance_by_query,
+    )
 
     def direction(logits, mask):
         log_probabilities = torch.nn.functional.log_softmax(logits, dim=1)
@@ -141,6 +176,7 @@ def train(
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
     pairs = _load_pairs(pairs_path)
+    relevance_by_query = _relevance_by_query(pairs)
     loader = DataLoader(cast(Any, pairs), batch_size=config.batch_size, shuffle=True)
     encoder = EmbeddingEncoder(config.model_id, config.model_revision, device)
     if config.precision in {"fp16", "bf16"} and encoder.device_type != "cuda":
@@ -229,7 +265,9 @@ def train(
                         positives, config.max_length, prompt_name="document"
                     )
                     scores = query_embeddings @ positive_embeddings.T / config.temperature
-                    raw_loss = _multi_positive_loss(scores, query_keys, document_keys)
+                    raw_loss = _multi_positive_loss(
+                        scores, query_keys, document_keys, relevance_by_query
+                    )
                 accumulated_loss += float(raw_loss.detach().cpu())
                 loss = raw_loss / config.gradient_accumulation_steps
                 scaler.scale(loss).backward()

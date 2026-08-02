@@ -197,3 +197,16 @@ def test_link_retrieval_pairs_rejects_output_alias(tmp_path: Path) -> None:
         link_retrieval_pairs(queries, documents, queries)
 
     assert queries.read_text() == '{"query":"q","positive_ids":["known"]}\n'
+
+
+def test_link_retrieval_pairs_rejects_conflicting_query_id(tmp_path: Path) -> None:
+    documents = tmp_path / "documents.jsonl"
+    documents.write_text('{"id":"one","text":"document one"}\n{"id":"two","text":"document two"}\n')
+    queries = tmp_path / "queries.jsonl"
+    queries.write_text(
+        '{"id":"shared","query":"first text","positive_ids":["one"]}\n'
+        '{"id":"shared","query":"different text","positive_ids":["two"]}\n'
+    )
+
+    with pytest.raises(ValueError, match="reuses ID 'shared' with different query text"):
+        link_retrieval_pairs(queries, documents, tmp_path / "pairs.jsonl")

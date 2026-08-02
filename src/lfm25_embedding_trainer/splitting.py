@@ -87,20 +87,30 @@ def sample_pairs_by_source(
 ) -> dict[str, int]:
     if per_source < 1:
         raise ValueError("per_source must be positive")
-    candidates: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    with input_path.open(encoding="utf-8") as source:
-        for line in source:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            digest = hashlib.sha256(line.encode()).hexdigest()
-            candidates[row["source"]].append((digest, line))
+    candidates: dict[str, dict[str, list[dict[str, object]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for line_number, row in enumerate(read_jsonl(input_path), 1):
+        source_name = _stable_id(row.get("source"), label=f"pair row {line_number} source")
+        candidates[source_name][_query_identifier(row)].append(row)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     counts = {}
     with output_path.open("w", encoding="utf-8") as output:
         for source_name in sorted(candidates):
-            selected = sorted(candidates[source_name])[:per_source]
+            ranked_groups = sorted(
+                candidates[source_name].values(),
+                key=lambda rows: hashlib.sha256(
+                    json.dumps(rows, ensure_ascii=False, sort_keys=True).encode()
+                ).digest(),
+            )
+            selected: list[dict[str, object]] = []
+            for group in ranked_groups:
+                if selected and len(selected) + len(group) > per_source:
+                    continue
+                selected.extend(group)
+                if len(selected) >= per_source:
+                    break
             counts[source_name] = len(selected)
-            for _, line in selected:
-                output.write(line if line.endswith("\n") else line + "\n")
+            for row in selected:
+                output.write(json.dumps(row, ensure_ascii=False) + "\n")
     return counts

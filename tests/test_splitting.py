@@ -102,3 +102,34 @@ def test_sample_pairs_is_deterministic_and_stratified(tmp_path: Path) -> None:
     assert sample_pairs_by_source(source, first, 2) == {"catalog": 2, "manuals": 2}
     sample_pairs_by_source(source, second, 2)
     assert first.read_bytes() == second.read_bytes()
+
+
+def test_sample_pairs_keeps_complete_query_relevance_sets(tmp_path: Path) -> None:
+    source = tmp_path / "pairs.jsonl"
+    rows = [
+        {
+            "query": "multi",
+            "query_id": "multi",
+            "positive": f"document {index}",
+            "source": "catalog",
+            "source_id": str(index),
+        }
+        for index in range(3)
+    ] + [
+        {
+            "query": "single",
+            "query_id": "single",
+            "positive": "other document",
+            "source": "catalog",
+            "source_id": "other",
+        }
+    ]
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    output = tmp_path / "sample.jsonl"
+
+    counts = sample_pairs_by_source(source, output, per_source=2)
+
+    sampled = [json.loads(line) for line in output.read_text().splitlines()]
+    multi_rows = [row for row in sampled if row["query_id"] == "multi"]
+    assert len(multi_rows) in {0, 3}
+    assert counts == {"catalog": len(sampled)}

@@ -94,7 +94,7 @@ def sample(
     output: Path = Path("data/evaluation-sample.jsonl"),
     per_source: Annotated[int, typer.Option(min=1)] = 250,
 ) -> None:
-    """Create a deterministic source-stratified evaluation sample."""
+    """Create a deterministic source-stratified sample of complete query labels."""
     typer.echo(json.dumps(sample_pairs_by_source(input_path, output, per_source), indent=2))
 
 
