@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 
 import numpy as np
 
+from .data import _query_identifier
 from .modeling import EmbeddingEncoder
 
 
@@ -64,26 +65,86 @@ def _write_progress(path: Path, payload: dict[str, Any]) -> None:
     partial.replace(path)
 
 
-def _load_pairs(path: Path) -> list[tuple[str, str, str]]:
+def _identity_key(source: object, identifier: object) -> str:
+    """Encode a namespaced identity without delimiter collisions."""
+    return json.dumps([str(source), str(identifier)], ensure_ascii=False, separators=(",", ":"))
+
+
+def _load_pairs(path: Path) -> list[tuple[str, str, str, str]]:
     pairs = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             row = json.loads(line)
-            document_key = f"{row['source']}:{row['source_id']}"
-            pairs.append((row["query"], row["positive"], document_key))
+            query_key = _identity_key(row["source"], _query_identifier(row))
+            document_key = _identity_key(row["source"], row["source_id"])
+            pairs.append((row["query"], row["positive"], query_key, document_key))
     if not pairs:
         raise ValueError("training pair file is empty")
     return pairs
 
 
-def _multi_positive_loss(scores, document_keys: list[str]):
-    """InfoNCE where repeated pseudo-queries for one document are all positives."""
+def _relevance_by_query(
+    pairs: list[tuple[str, str, str, str]],
+) -> dict[str, set[str]]:
+    relevance: dict[str, set[str]] = {}
+    for _, _, query_key, document_key in pairs:
+        relevance.setdefault(query_key, set()).add(document_key)
+    return relevance
+
+
+def _positive_mask(
+    query_keys: list[str],
+    document_keys: list[str],
+    *,
+    device,
+    relevance_by_query: dict[str, set[str]] | None = None,
+):
+    """Build known edge labels; shared nodes do not imply transitive relevance."""
     import torch
 
-    positive_mask = torch.tensor(
-        [[left == right for right in document_keys] for left in document_keys],
-        dtype=torch.bool,
+    if len(query_keys) != len(document_keys):
+        raise ValueError("query and document key counts must match")
+    if relevance_by_query is None:
+        relevance_by_query = {}
+        for query_key, document_key in zip(query_keys, document_keys, strict=True):
+            relevance_by_query.setdefault(query_key, set()).add(document_key)
+
+    document_positions: dict[str, list[int]] = {}
+    for index, document_key in enumerate(document_keys):
+        document_positions.setdefault(document_key, []).append(index)
+    row_indices: list[int] = []
+    column_indices: list[int] = []
+    for row_index, query_key in enumerate(query_keys):
+        for document_key in relevance_by_query.get(query_key, set()):
+            for column_index in document_positions.get(document_key, []):
+                row_indices.append(row_index)
+                column_indices.append(column_index)
+
+    positive_mask = torch.zeros(
+        (len(query_keys), len(document_keys)), dtype=torch.bool, device=device
+    )
+    if row_indices:
+        coordinates = torch.tensor([row_indices, column_indices], dtype=torch.int64, device=device)
+        positive_mask[coordinates[0], coordinates[1]] = True
+    return positive_mask
+
+
+def _multi_positive_loss(
+    scores,
+    query_keys: list[str],
+    document_keys: list[str],
+    relevance_by_query: dict[str, set[str]] | None = None,
+):
+    """InfoNCE that preserves known many-to-many query/document relevance."""
+    import torch
+
+    if scores.ndim != 2 or scores.shape != (len(query_keys), len(document_keys)):
+        raise ValueError("scores must be square with one row per query/document pair")
+    positive_mask = _positive_mask(
+        query_keys,
+        document_keys,
         device=scores.device,
+        relevance_by_query=relevance_by_query,
     )
 
     def direction(logits, mask):
@@ -115,6 +176,7 @@ def train(
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
     pairs = _load_pairs(pairs_path)
+    relevance_by_query = _relevance_by_query(pairs)
     loader = DataLoader(cast(Any, pairs), batch_size=config.batch_size, shuffle=True)
     encoder = EmbeddingEncoder(config.model_id, config.model_revision, device)
     if config.precision in {"fp16", "bf16"} and encoder.device_type != "cuda":
@@ -187,7 +249,10 @@ def train(
     try:
         for epoch in range(config.epochs):
             for batch_index, batch in enumerate(loader, 1):
-                queries, positives, document_keys = list(batch[0]), list(batch[1]), list(batch[2])
+                queries = list(batch[0])
+                positives = list(batch[1])
+                query_keys = list(batch[2])
+                document_keys = list(batch[3])
                 with torch.autocast(
                     device_type=encoder.device_type,
                     dtype=amp_dtype,
@@ -200,7 +265,9 @@ def train(
                         positives, config.max_length, prompt_name="document"
                     )
                     scores = query_embeddings @ positive_embeddings.T / config.temperature
-                    raw_loss = _multi_positive_loss(scores, document_keys)
+                    raw_loss = _multi_positive_loss(
+                        scores, query_keys, document_keys, relevance_by_query
+                    )
                 accumulated_loss += float(raw_loss.detach().cpu())
                 loss = raw_loss / config.gradient_accumulation_steps
                 scaler.scale(loss).backward()

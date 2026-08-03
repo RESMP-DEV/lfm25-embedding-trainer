@@ -1,0 +1,3 @@
+{"id":"router-reset","text":"To restore factory settings, hold the recessed reset button for ten seconds while the router is powered on.","group_id":"router-manual"}
+{"id":"router-led","text":"A blinking amber status light means the router cannot reach the upstream network.","group_id":"router-manual"}
+{"id":"account-mfa","text":"To replace an authenticator, sign in with a recovery code and register the new device under Security.","group_id":"account-manual"}

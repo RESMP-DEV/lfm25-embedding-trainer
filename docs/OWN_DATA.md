@@ -37,6 +37,44 @@ colliding and supports deterministic source-stratified evaluation samples.
 
 ## 3. Convert and validate
 
+### Corpus plus relevance labels
+
+The most reusable layout keeps the document corpus separate from query labels. Documents carry
+stable IDs and optional parent groups:
+
+```json
+{"id":"manual:reset","text":"Hold the reset button …","group_id":"manual"}
+```
+
+Each labeled query links to one or more relevant document IDs:
+
+```json
+{"id":"q-001","query":"How do I reset it?","positive_ids":["manual:reset"]}
+```
+
+Join them into training pairs with referential-integrity checks:
+
+```bash
+uv run lfm25-embed link \
+  examples/linked-queries.jsonl examples/linked-documents.jsonl \
+  --output data/pairs.jsonl --source support
+
+uv run lfm25-embed validate data/pairs.jsonl
+```
+
+`link` rejects duplicate document IDs, missing references, empty text, and unlabeled queries. One
+query with several relevant IDs becomes several rows sharing a `query_id`; the loss treats every
+linked document as positive for that query rather than using the other links as false negatives.
+Repeated IDs are deduplicated. The document `group_id` is copied to every pair, which prevents
+sibling chunks from crossing data splits.
+
+If your labels come from production search, use accepted/clicked results only after controlling
+for position bias and accidental clicks. If an LLM generates candidate questions from chunks,
+have people review a sample and keep a separate human-authored test set. Synthetic questions often
+echo the source language and can make retrieval look better than it is.
+
+### Inline query-document rows
+
 If the input already has the canonical fields:
 
 ```bash
@@ -57,6 +95,26 @@ uv run lfm25-embed prepare raw.jsonl \
 
 Validation reports pair count, unique document count, unique group count, and source counts. It
 rejects malformed JSON, missing required fields, and empty query/document text.
+
+### End-to-end first run
+
+The included linked example is deliberately tiny and proves plumbing, not model quality:
+
+```bash
+uv run lfm25-embed link \
+  examples/linked-queries.jsonl examples/linked-documents.jsonl \
+  --output data/pairs.jsonl --source example
+uv run lfm25-embed validate data/pairs.jsonl
+uv run lfm25-embed train data/pairs.jsonl \
+  --config configs/cuda-smoke.toml \
+  --output models/linked-example --device cuda
+uv run lfm25-embed embed models/linked-example examples/linked-documents.jsonl \
+  --output artifacts/linked-document-embeddings.jsonl \
+  --prompt-name document
+```
+
+For a real experiment, collect enough independent document groups to produce meaningful train,
+development, and test splits before running `split`, `sweep`, or claiming improvement.
 
 ## 4. Freeze the splits
 
@@ -144,3 +202,13 @@ both indexed documents and live queries. Rebuild the document index whenever any
 
 Version the index by checkpoint and corpus hash. Build a new collection for a candidate model,
 validate it, then switch traffic atomically. Keep the previous index available for rollback.
+
+## Further reading
+
+- [Maxime Labonne's LLM course](https://github.com/mlabonne/llm-course) covers the broader data
+  curation, document ingestion, chunking, vector-store, and evaluation workflow. It is useful
+  context, though it is not a drop-in LFM2.5 embedding-training recipe.
+- [Sentence Transformers training overview](https://sbert.net/docs/sentence_transformer/training_overview.html)
+  explains how dataset shape, loss choice, evaluators, and training fit together.
+- [Sentence Transformers dataset overview](https://sbert.net/docs/sentence_transformer/dataset_overview.html)
+  compares positive pairs, triplets, labeled pairs, and hard-negative mining.

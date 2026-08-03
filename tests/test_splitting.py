@@ -53,6 +53,42 @@ def test_split_keeps_chunked_article_together(tmp_path: Path) -> None:
     assert len(locations) == 1
 
 
+def test_split_keeps_query_document_group_component_together(tmp_path: Path) -> None:
+    source = tmp_path / "pairs.jsonl"
+    rows = [
+        {
+            "query": "shared query",
+            "query_id": "shared",
+            "positive": "section 1",
+            "source": "journal",
+            "source_id": "article-a:s1",
+            "group_id": "article-a",
+        },
+        {
+            "query": "shared query",
+            "query_id": "shared",
+            "positive": "section 2",
+            "source": "journal",
+            "source_id": "article-b:s1",
+            "group_id": "article-b",
+        },
+        {
+            "query": "related query",
+            "query_id": "related",
+            "positive": "section 3",
+            "source": "journal",
+            "source_id": "article-b:s2",
+            "group_id": "article-b",
+        },
+    ]
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    output = tmp_path / "splits"
+
+    counts = split_pairs(source, output, dev_ratio=0.3, test_ratio=0.3)
+
+    assert sorted(counts.values()) == [0, 0, 3]
+
+
 def test_sample_pairs_is_deterministic_and_stratified(tmp_path: Path) -> None:
     source = tmp_path / "pairs.jsonl"
     rows = [
@@ -66,3 +102,34 @@ def test_sample_pairs_is_deterministic_and_stratified(tmp_path: Path) -> None:
     assert sample_pairs_by_source(source, first, 2) == {"catalog": 2, "manuals": 2}
     sample_pairs_by_source(source, second, 2)
     assert first.read_bytes() == second.read_bytes()
+
+
+def test_sample_pairs_keeps_complete_query_relevance_sets(tmp_path: Path) -> None:
+    source = tmp_path / "pairs.jsonl"
+    rows = [
+        {
+            "query": "multi",
+            "query_id": "multi",
+            "positive": f"document {index}",
+            "source": "catalog",
+            "source_id": str(index),
+        }
+        for index in range(3)
+    ] + [
+        {
+            "query": "single",
+            "query_id": "single",
+            "positive": "other document",
+            "source": "catalog",
+            "source_id": "other",
+        }
+    ]
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    output = tmp_path / "sample.jsonl"
+
+    counts = sample_pairs_by_source(source, output, per_source=2)
+
+    sampled = [json.loads(line) for line in output.read_text().splitlines()]
+    multi_rows = [row for row in sampled if row["query_id"] == "multi"]
+    assert len(multi_rows) in {0, 3}
+    assert counts == {"catalog": len(sampled)}
