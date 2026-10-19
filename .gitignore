@@ -17,3 +17,5 @@ models/
 wandb/
 *.db
 *.sqlite3
+build/
+configs/rtx6000-ada/
