@@ -1,7 +1,9 @@
 import ast
 import inspect
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 from lfm25_embedding_trainer.modeling import (
     _copy_compatible_remote_code,
@@ -40,7 +42,7 @@ def test_shortconv_patch_ignores_transformers5_seq_idx() -> None:
         def __init__(self):
             pass
 
-        def slow_forward(self, value):
+        def slow_forward(self, value):  # ty: ignore[invalid-method-override]
             return value + 1
 
     module = LegacyShortConv()
@@ -50,7 +52,7 @@ def test_shortconv_patch_ignores_transformers5_seq_idx() -> None:
             return [module]
 
     assert _patch_shortconv_seq_idx(Model()) is True
-    assert module.slow_forward(2, seq_idx="unused") == 3
+    assert module.slow_forward(2, seq_idx="unused") == 3  # ty: ignore[unknown-argument]
     assert _patch_shortconv_seq_idx(Model()) is False
     assert "seq_idx" not in inspect.signature(LegacyShortConv.slow_forward).parameters
 
@@ -87,5 +89,6 @@ def test_saved_remote_code_patch_tolerates_signature_formatting(tmp_path: Path) 
 
     namespace: dict[str, object] = {}
     exec(destination.read_text(), namespace)
-    signature = inspect.signature(namespace["_noncausal_shortconv_forward"])
+    forward = cast(Callable[..., Any], namespace["_noncausal_shortconv_forward"])
+    signature = inspect.signature(forward)
     assert signature.parameters["seq_idx"].kind is inspect.Parameter.KEYWORD_ONLY
