@@ -174,8 +174,8 @@ revision, and pair-file SHA-256 are recorded.
 
 ## Optuna sweep
 
-The sweep searches learning rate, weight decay, warmup ratio, and contrastive temperature. It
-selects by development MRR and never reads the test set:
+The sweep searches learning rate, weight decay, warmup ratio, and contrastive temperature, and
+can also search batch size. It selects by development MRR and never reads the test set:
 
 ```bash
 uv run lfm25-embed sample data/splits/dev.jsonl \
@@ -192,6 +192,31 @@ uv run lfm25-embed sweep data/splits/train.jsonl data/dev-sample.jsonl \
 
 Sampling keeps every relevance label for a selected query together. `--per-source` is therefore
 a soft row cap: a single query with more linked positives than the cap is retained in full.
+
+### Batch size is a quality hyperparameter
+
+This trainer uses symmetric multi-positive InfoNCE over an in-batch score matrix, so the batch
+size is the in-batch negative set. It changes the size of the contrastive denominator and
+therefore interacts with temperature and learning rate: a learning-rate band measured at one
+batch size does not transfer to another.
+
+Search it explicitly with `--batch-sizes`:
+
+```bash
+uv run lfm25-embed sweep data/splits/train.jsonl data/dev-sample.jsonl \
+  --config configs/cuda.toml \
+  --output models/optuna-sweep-batch \
+  --trials 24 --steps-per-trial 250 \
+  --batch-sizes 32,128,512 \
+  --device cuda \
+  --wandb-mode offline
+```
+
+Batch size is also the main memory lever. Measured for this 350M model on a 24 GB RTX 3090 Ti at
+max length 512, peak allocated memory grows about linearly with batch size: 2.99 GiB at batch
+32, 7.65 GiB at 256, 13.08 GiB at 512, and 18.76 GiB at 768, with batch 1024 out of memory.
+Larger batches also improve throughput per pair. Choose a batch size the host can hold, then let
+the sweep tune the remaining parameters around it.
 
 The persistent SQLite study and `sweep_summary.json` make selection reproducible. Non-winning
 trial weights are removed after the study; their configurations, receipts, metrics, and W&B

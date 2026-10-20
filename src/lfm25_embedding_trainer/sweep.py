@@ -38,6 +38,7 @@ def run_sweep(
     wandb_project: str = "lfm25-embedding-trainer",
     wandb_entity: str | None = None,
     study_name: str = "lfm25-embedding-optuna",
+    batch_sizes: tuple[int, ...] = (),
 ) -> dict[str, Any]:
     try:
         import optuna
@@ -58,8 +59,18 @@ def run_sweep(
     )
 
     def objective(trial) -> float:
+        # Batch size is the in-batch negative set for this contrastive
+        # objective, so it changes the size of the InfoNCE denominator and
+        # therefore interacts with temperature and learning rate. Search it
+        # together with them instead of holding it fixed, otherwise the
+        # selected operating point only describes one negative count.
+        if batch_sizes:
+            batch_size = trial.suggest_categorical("batch_size", list(batch_sizes))
+        else:
+            batch_size = base.batch_size
         config = replace(
             base,
+            batch_size=batch_size,
             learning_rate=trial.suggest_float("learning_rate", 5e-6, 6e-5, log=True),
             weight_decay=trial.suggest_float("weight_decay", 0.01, 0.2, log=True),
             warmup_ratio=trial.suggest_float("warmup_ratio", 0.03, 0.15),
@@ -103,6 +114,12 @@ def run_sweep(
         "best_validation_mrr": study.best_value,
         "best_parameters": study.best_params,
         "best_directory": str(output_directory / f"trial-{best_number:03d}"),
+        "searched_batch_sizes": list(batch_sizes) if batch_sizes else None,
+        "batch_size_note": (
+            "batch_size is the in-batch negative count for the contrastive "
+            "objective; a learning-rate band measured at one batch size does "
+            "not transfer to another"
+        ),
     }
     (output_directory / "sweep_summary.json").write_text(
         json.dumps(summary, indent=2) + "\n", encoding="utf-8"

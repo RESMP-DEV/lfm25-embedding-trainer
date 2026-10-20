@@ -141,10 +141,33 @@ def sweep(
     wandb_project: str = typer.Option("lfm25-embedding-trainer"),
     wandb_entity: str | None = None,
     study_name: str = typer.Option("lfm25-embedding-optuna"),
+    batch_sizes: str = typer.Option(
+        "",
+        help=(
+            "Comma-separated batch sizes to search, for example 32,128,512. "
+            "Batch size is the in-batch negative count for the contrastive "
+            "objective, so it is searched jointly with learning rate and "
+            "temperature. Empty keeps the base config batch size."
+        ),
+    ),
 ) -> None:
     """Select hyperparameters with Optuna using validation MRR."""
     if wandb_mode not in {"disabled", "offline", "online"}:
         raise typer.BadParameter("must be disabled, offline, or online", param_hint="wandb-mode")
+    parsed_batch_sizes: tuple[int, ...] = ()
+    if batch_sizes:
+        values = []
+        for part in batch_sizes.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            value = int(part)
+            if value < 1:
+                raise typer.BadParameter("batch sizes must be positive", param_hint="batch-sizes")
+            values.append(value)
+        if not values:
+            raise typer.BadParameter("batch sizes must not be empty", param_hint="batch-sizes")
+        parsed_batch_sizes = tuple(sorted(set(values)))
     result = run_sweep(
         pairs,
         validation_pairs,
@@ -157,6 +180,7 @@ def sweep(
         wandb_project=wandb_project,
         wandb_entity=wandb_entity,
         study_name=study_name,
+        batch_sizes=parsed_batch_sizes,
     )
     typer.echo(json.dumps(result, indent=2))
 
