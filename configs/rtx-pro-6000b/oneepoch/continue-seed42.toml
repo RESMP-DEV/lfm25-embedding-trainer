@@ -1,0 +1,14 @@
+model_id = "/home/ubuntu/prime-seed42/seed/promoted-lr-2p5e-5"
+model_revision = "main"
+max_length = 512
+batch_size = 32
+learning_rate = 0.000025
+weight_decay = 0.018891200276189388
+warmup_ratio = 0.051818996064852074
+epochs = 1
+temperature = 0.03223743847396823
+gradient_accumulation_steps = 1
+seed = 42
+max_steps = 10054
+log_every_steps = 25
+precision = "bf16"
