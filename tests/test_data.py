@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -210,3 +212,26 @@ def test_link_retrieval_pairs_rejects_conflicting_query_id(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="reuses ID 'shared' with different query text"):
         link_retrieval_pairs(queries, documents, tmp_path / "pairs.jsonl")
+
+
+def test_link_retrieval_pairs_writes_umask_adjusted_output_mode(tmp_path: Path) -> None:
+    documents = tmp_path / "documents.jsonl"
+    documents.write_text('{"id":"document","text":"document"}\n')
+    queries = tmp_path / "queries.jsonl"
+    queries.write_text('{"query":"q","positive_ids":["document"]}\n')
+    output = tmp_path / "pairs.jsonl"
+    private_output = tmp_path / "private.jsonl"
+
+    previous = os.umask(0o022)
+    try:
+        link_retrieval_pairs(queries, documents, output)
+        assert stat.S_IMODE(output.stat().st_mode) == 0o644
+    finally:
+        os.umask(previous)
+
+    previous = os.umask(0o077)
+    try:
+        link_retrieval_pairs(queries, documents, private_output)
+        assert stat.S_IMODE(private_output.stat().st_mode) == 0o600
+    finally:
+        os.umask(previous)

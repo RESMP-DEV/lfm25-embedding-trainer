@@ -115,8 +115,11 @@ def _positive_mask(
     row_indices: list[int] = []
     column_indices: list[int] = []
     for row_index, query_key in enumerate(query_keys):
-        for document_key in relevance_by_query.get(query_key, set()):
-            for column_index in document_positions.get(document_key, []):
+        relevant_documents = relevance_by_query.get(query_key, set())
+        for document_key, column_indices_for_key in document_positions.items():
+            if document_key not in relevant_documents:
+                continue
+            for column_index in column_indices_for_key:
                 row_indices.append(row_index)
                 column_indices.append(column_index)
 

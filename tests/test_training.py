@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from pathlib import Path
 
 import torch
@@ -73,6 +74,35 @@ def test_positive_mask_uses_dataset_edges_without_inventing_transitive_labels() 
     )
 
     assert torch.equal(mask, torch.tensor([[True, True], [False, True]]))
+
+
+class _CountingRelevanceSet(set[str]):
+    def __init__(self, items: set[str]) -> None:
+        super().__init__(items)
+        self.membership_checks = 0
+
+    def __contains__(self, item: object) -> bool:
+        self.membership_checks += 1
+        return super().__contains__(item)
+
+    def __iter__(self) -> Iterator[str]:
+        raise AssertionError("relevance sets must not be scanned per query occurrence")
+
+
+def test_positive_mask_is_bounded_by_batch_not_dataset_relevance() -> None:
+    relevant_documents = _CountingRelevanceSet(
+        {f"d{index}" for index in range(1000)} | {"d1", "d2"}
+    )
+
+    mask = _positive_mask(
+        ["q1", "q1"],
+        ["d1", "d2"],
+        device="cpu",
+        relevance_by_query={"q1": relevant_documents},
+    )
+
+    assert torch.equal(mask, torch.tensor([[True, True], [True, True]]))
+    assert 0 < relevant_documents.membership_checks <= 2 * 2
 
 
 def test_train_config_supports_bounded_run(tmp_path: Path) -> None:
