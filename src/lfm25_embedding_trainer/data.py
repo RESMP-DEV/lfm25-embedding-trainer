@@ -27,6 +27,13 @@ def _query_identifier(row: dict[str, Any]) -> str:
     return _stable_id(row["query"], label="query")
 
 
+def _umask_adjusted_file_mode() -> int:
+    """Return a 0644-class file mode that honors the process umask."""
+    mask = os.umask(0)
+    os.umask(mask)
+    return 0o666 & ~mask
+
+
 def _write_jsonl_atomically(rows: list[dict[str, Any]], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, partial_name = tempfile.mkstemp(
@@ -41,6 +48,7 @@ def _write_jsonl_atomically(rows: list[dict[str, Any]], output_path: Path) -> No
                 output.write(json.dumps(row, ensure_ascii=False) + "\n")
             output.flush()
             os.fsync(output.fileno())
+        partial_path.chmod(_umask_adjusted_file_mode())
         partial_path.replace(output_path)
     except BaseException:
         partial_path.unlink(missing_ok=True)
